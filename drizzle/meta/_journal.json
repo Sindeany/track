@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1787411771553,
+      "tag": "0000_nifty_liz_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1787412006216,
+      "tag": "0001_woozy_patch",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788460644635,
+      "tag": "0002_omniscient_runaways",
+      "breakpoints": true
+    }
+  ]
+}

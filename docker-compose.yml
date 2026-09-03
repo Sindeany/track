@@ -1,0 +1,16 @@
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: field_visits
+      MYSQL_USER: fieldvisits
+      MYSQL_PASSWORD: fieldvisits_dev_password
+      MYSQL_ROOT_PASSWORD: root_dev_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - field_visits_mysql:/var/lib/mysql
+
+volumes:
+  field_visits_mysql:

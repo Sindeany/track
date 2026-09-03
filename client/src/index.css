@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Tajawal", ui-sans-serif, system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --background: #F4F7F7;
+  --foreground: #1A3230;
+  --card: #FFFFFF;
+  --card-foreground: #1A3230;
+  --popover: #FFFFFF;
+  --popover-foreground: #1A3230;
+  --primary: #0D625B;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EAF3F1;
+  --secondary-foreground: #174E49;
+  --muted: #EFF5F4;
+  --muted-foreground: #64748B;
+  --accent: #E2F1EE;
+  --accent-foreground: #174E49;
+  --destructive: #B42318;
+  --border: #D8E5E2;
+  --input: #D8E5E2;
+  --ring: #1D756C;
+  --radius: 0.75rem;
+}
+
+* { border-color: var(--border); }
+html { background: var(--background); }
+body { min-width: 320px; background: var(--background); color: var(--foreground); font-family: "Tajawal", ui-sans-serif, system-ui, sans-serif; }
+button, input, textarea, select { font-family: inherit; }
+button:not(:disabled) { cursor: pointer; }
+button:active { transform: scale(.98); }
+::selection { background: #C9EAE3; color: #104946; }
+@media (prefers-reduced-motion: no-preference) { * { scroll-behavior: smooth; } }

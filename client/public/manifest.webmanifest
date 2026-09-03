@@ -1,0 +1,12 @@
+{
+  "name": "زيارة ميدانية - تقارير المبيعات",
+  "short_name": "زيارة ميدانية",
+  "description": "تطبيق عربي لإدارة تقارير الزيارات الميدانية للمندوبين والمديرين.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F7F7",
+  "theme_color": "#104946",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
