@@ -5,7 +5,7 @@ import { createSessionToken, hashPassword, verifyPassword } from "./_core/auth";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
-import { createUserWithPassword, getUserByLogin, getUserByOpenId, listRepresentatives, updateUserLastSignedIn } from "./db";
+import { createUserWithPassword, getUserById, getUserByLogin, getUserByOpenId, listRepresentatives, listStaffWithKPIs, resetStaffPassword, updateStaffUser, updateUserLastSignedIn } from "./db";
 import { visitsRouter } from "./routers/visits";
 
 export const appRouter = router({
@@ -25,6 +25,13 @@ export const appRouter = router({
           throw new TRPCError({
             code: "UNAUTHORIZED",
             message: "اسم المستخدم أو كلمة المرور غير صحيحة.",
+          });
+        }
+
+        if (user.isActive === false) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "تم تجميد هذا الحساب من قبل الإدارة. يرجى مراجعة المسؤول.",
           });
         }
 
@@ -92,6 +99,60 @@ export const appRouter = router({
     listUsers: adminProcedure.query(async () => {
       return listRepresentatives();
     }),
+    listStaffKPIs: adminProcedure.query(async () => {
+      return listStaffWithKPIs();
+    }),
+    updateUser: adminProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          name: z.string().trim().min(2, "اسم الموظف مطلوب.").max(180).optional(),
+          email: z.string().trim().email("صيغة البريد الإلكتروني غير صحيحة.").nullable().optional(),
+          isActive: z.boolean().optional(),
+          role: z.enum(["user", "admin"]).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        if (input.id === ctx.user.id && input.isActive === false) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "لا يمكنك تجميد حسابك الحالي لتجنب إقفال لوحة التحكم.",
+          });
+        }
+        const updated = await updateStaffUser(input.id, {
+          name: input.name,
+          email: input.email,
+          isActive: input.isActive,
+          role: input.role,
+        });
+        if (!updated) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "المستخدم غير موجود." });
+        }
+        return {
+          id: updated.id,
+          openId: updated.openId,
+          name: updated.name,
+          email: updated.email,
+          role: updated.role,
+          isActive: updated.isActive,
+        };
+      }),
+    resetPassword: adminProcedure
+      .input(
+        z.object({
+          userId: z.number().int().positive(),
+          newPassword: z.string().min(6, "كلمة المرور يجب ألا تقل عن 6 خانات."),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const targetUser = await getUserById(input.userId);
+        if (!targetUser) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "المستخدم غير موجود." });
+        }
+        const newHash = hashPassword(input.newPassword);
+        await resetStaffPassword(input.userId, newHash);
+        return { success: true as const, message: "تم إعادة تعيين كلمة المرور بنجاح." };
+      }),
   }),
   visits: visitsRouter,
 });

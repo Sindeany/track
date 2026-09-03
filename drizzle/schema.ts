@@ -1,4 +1,4 @@
-import { decimal, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, decimal, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -8,6 +8,7 @@ export const users = mysqlTable("users", {
   passwordHash: varchar("passwordHash", { length: 255 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),

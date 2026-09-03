@@ -30,7 +30,7 @@ export async function createContext(
       const session = verifySessionToken(sessionToken);
       if (session?.userId) {
         const foundUser = await getUserById(session.userId);
-        if (foundUser) {
+        if (foundUser && foundUser.isActive) {
           user = foundUser;
         }
       }

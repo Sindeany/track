@@ -129,11 +129,85 @@ export async function listRepresentatives() {
       name: users.name,
       email: users.email,
       role: users.role,
+      isActive: users.isActive,
       createdAt: users.createdAt,
       lastSignedIn: users.lastSignedIn,
     })
     .from(users)
     .orderBy(desc(users.createdAt));
+}
+
+export async function listStaffWithKPIs() {
+  const db = requireDb(await getDb());
+  const now = new Date();
+  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const staffList = await db
+    .select({
+      id: users.id,
+      openId: users.openId,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+      lastSignedIn: users.lastSignedIn,
+    })
+    .from(users)
+    .orderBy(desc(users.createdAt));
+
+  const allVisits = await db
+    .select({
+      id: visits.id,
+      representativeId: visits.representativeId,
+      visitedAt: visits.visitedAt,
+    })
+    .from(visits);
+
+  return staffList.map(staff => {
+    const userVisits = allVisits.filter(v => v.representativeId === staff.id);
+    const totalVisits = userVisits.length;
+    const thisMonthVisits = userVisits.filter(v => v.visitedAt >= startOfMonth).length;
+    const last7DaysVisits = userVisits.filter(v => v.visitedAt >= sevenDaysAgo).length;
+
+    let lastVisitAt: Date | null = null;
+    for (const v of userVisits) {
+      if (!lastVisitAt || v.visitedAt > lastVisitAt) {
+        lastVisitAt = v.visitedAt;
+      }
+    }
+
+    return {
+      ...staff,
+      totalVisits,
+      thisMonthVisits,
+      last7DaysVisits,
+      lastVisitAt,
+    };
+  });
+}
+
+export async function updateStaffUser(
+  id: number,
+  data: { name?: string; email?: string | null; isActive?: boolean; role?: "user" | "admin" }
+) {
+  const db = requireDb(await getDb());
+  const updateSet: Record<string, unknown> = {};
+  if (data.name !== undefined) updateSet.name = data.name.trim();
+  if (data.email !== undefined) updateSet.email = data.email ? data.email.trim().toLowerCase() : null;
+  if (data.isActive !== undefined) updateSet.isActive = data.isActive;
+  if (data.role !== undefined) updateSet.role = data.role;
+  updateSet.updatedAt = new Date();
+
+  await db.update(users).set(updateSet).where(eq(users.id, id));
+  return getUserById(id);
+}
+
+export async function resetStaffPassword(id: number, passwordHash: string) {
+  const db = requireDb(await getDb());
+  await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, id));
+  return true;
 }
 
 export async function getOrCreateDemoUser(role: "user" | "admin") {

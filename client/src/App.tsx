@@ -7,6 +7,7 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import ManagerDashboard from "./pages/ManagerDashboard";
 import ManagerReportDetail from "./pages/ManagerReportDetail";
+import ManagerStaff from "./pages/ManagerStaff";
 import NotFound from "./pages/NotFound";
 import ReportDetail from "./pages/ReportDetail";
 import ReportsHistory from "./pages/ReportsHistory";
@@ -20,6 +21,7 @@ function Router() {
     <Route path="/reports/new" component={VisitForm} />
     <Route path="/reports/:id" component={ReportDetail} />
     <Route path="/manager" component={ManagerDashboard} />
+    <Route path="/manager/staff" component={ManagerStaff} />
     <Route path="/manager/reports/:id" component={ManagerReportDetail} />
     <Route component={NotFound} />
   </Switch>;

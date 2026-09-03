@@ -1,4 +1,4 @@
-import { ClipboardList, LayoutDashboard, PlusCircle } from "lucide-react";
+import { ClipboardList, LayoutDashboard, PlusCircle, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type AppNavigationItem = { label: string; path: string; icon: LucideIcon };
@@ -10,4 +10,5 @@ export const representativeNavigation: AppNavigationItem[] = [
 
 export const managerNavigation: AppNavigationItem[] = [
   { icon: LayoutDashboard, label: "لوحة المتابعة", path: "/manager" },
+  { icon: Users, label: "فريق العمل والأداء", path: "/manager/staff" },
 ];
