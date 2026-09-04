@@ -1,6 +1,6 @@
-import { desc, eq, inArray, or } from "drizzle-orm";
+import { asc, desc, eq, inArray, like, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, InsertVisit, users, visitComments, visitPhotos, visits } from "../drizzle/schema";
+import { clients, InsertClient, InsertUser, InsertVisit, users, visitComments, visitPhotos, visits } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -324,3 +324,87 @@ export async function getVisitForManager(id: number) {
   }).from(visits).innerJoin(users, eq(visits.representativeId, users.id)).where(eq(visits.id, id)).limit(1);
   return rows[0] ? (await hydrateVisits(rows))[0] : undefined;
 }
+
+export async function searchClients(query = "") {
+  const db = requireDb(await getDb());
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return db
+      .select()
+      .from(clients)
+      .orderBy(desc(clients.updatedAt))
+      .limit(10);
+  }
+  return db
+    .select()
+    .from(clients)
+    .where(like(clients.name, `%${trimmed}%`))
+    .orderBy(desc(clients.updatedAt))
+    .limit(10);
+}
+
+export async function listClients() {
+  const db = requireDb(await getDb());
+  return db.select().from(clients).orderBy(asc(clients.name));
+}
+
+export async function getClientById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+  return result[0];
+}
+
+export async function upsertClientFromVisit(params: {
+  name: string;
+  address: string;
+  contactPerson?: string | null;
+  contactRole?: string | null;
+  phone: string;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  const name = params.name.trim();
+  if (!name) return;
+
+  const values: InsertClient = {
+    name,
+    address: params.address.trim(),
+    contactPerson: params.contactPerson?.trim() || null,
+    contactRole: params.contactRole?.trim() || null,
+    phone: params.phone.trim(),
+  };
+
+  const updateSet: Record<string, unknown> = {
+    address: values.address,
+    phone: values.phone,
+    updatedAt: new Date(),
+  };
+  if (values.contactPerson) updateSet.contactPerson = values.contactPerson;
+  if (values.contactRole) updateSet.contactRole = values.contactRole;
+
+  await db.insert(clients).values(values).onDuplicateKeyUpdate({ set: updateSet });
+}
+
+export async function updateClient(
+  id: number,
+  params: { name?: string; address?: string; contactPerson?: string | null; contactRole?: string | null; phone?: string }
+) {
+  const db = requireDb(await getDb());
+  const updateSet: Record<string, unknown> = { updatedAt: new Date() };
+  if (params.name !== undefined) updateSet.name = params.name.trim();
+  if (params.address !== undefined) updateSet.address = params.address.trim();
+  if (params.contactPerson !== undefined) updateSet.contactPerson = params.contactPerson?.trim() || null;
+  if (params.contactRole !== undefined) updateSet.contactRole = params.contactRole?.trim() || null;
+  if (params.phone !== undefined) updateSet.phone = params.phone.trim();
+
+  await db.update(clients).set(updateSet).where(eq(clients.id, id));
+  return getClientById(id);
+}
+
+export async function deleteClient(id: number) {
+  const db = requireDb(await getDb());
+  await db.delete(clients).where(eq(clients.id, id));
+  return true;
+}
+

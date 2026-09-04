@@ -6,6 +6,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
 import { createUserWithPassword, getUserById, getUserByLogin, getUserByOpenId, listRepresentatives, listStaffWithKPIs, resetStaffPassword, updateStaffUser, updateUserLastSignedIn } from "./db";
+import { clientsRouter } from "./routers/clients";
 import { visitsRouter } from "./routers/visits";
 
 export const appRouter = router({
@@ -155,6 +156,7 @@ export const appRouter = router({
       }),
   }),
   visits: visitsRouter,
+  clients: clientsRouter,
 });
 
 export type AppRouter = typeof appRouter;

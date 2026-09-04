@@ -18,6 +18,11 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
     },
+    clients: {
+      search: {
+        useQuery: () => ({ data: [], isLoading: false }),
+      },
+    },
   },
 }));
 

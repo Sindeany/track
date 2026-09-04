@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addVisitComment, addVisitPhotos, createVisit, getVisitForManager, getVisitForRepresentative, listVisitsForManager, listVisitsForRepresentative } from "../db";
+import { addVisitComment, addVisitPhotos, createVisit, getVisitForManager, getVisitForRepresentative, listVisitsForManager, listVisitsForRepresentative, upsertClientFromVisit } from "../db";
 import { storagePut } from "../storage";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 
@@ -60,6 +60,17 @@ export const visitsRouter = router({
       return { visitId, objectKey: file.key, objectUrl: file.url };
     }));
     await addVisitPhotos(photos);
+    try {
+      await upsertClientFromVisit({
+        name: input.clientName,
+        address: input.address,
+        contactPerson: input.employeeName,
+        contactRole: input.employeeRole,
+        phone: input.phone,
+      });
+    } catch (error) {
+      console.warn("[Visits] Auto-upsert client failed:", error);
+    }
     return { id: visitId, capturedAt };
   }),
   managerList: adminProcedure.query(() => {

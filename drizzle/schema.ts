@@ -53,7 +53,23 @@ export const visitComments = mysqlTable("visitComments", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [index("visit_comments_visit_idx").on(table.visitId)]);
 
+export const clients = mysqlTable("clients", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 180 }).notNull().unique(),
+  address: text("address").notNull(),
+  contactPerson: varchar("contactPerson", { length: 180 }),
+  contactRole: varchar("contactRole", { length: 180 }),
+  phone: varchar("phone", { length: 32 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [
+  index("clients_name_idx").on(table.name),
+]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Visit = typeof visits.$inferSelect;
 export type InsertVisit = typeof visits.$inferInsert;
+export type Client = typeof clients.$inferSelect;
+export type InsertClient = typeof clients.$inferInsert;
+
