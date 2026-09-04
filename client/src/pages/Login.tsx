@@ -4,10 +4,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
-import { Eye, EyeOff, Loader2, LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
+import { Eye, EyeOff, Loader2, LockKeyhole, ShieldCheck, Smartphone, UserRound } from "lucide-react";
 import React, { FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
+import { usePwaInstall } from "@/hooks/usePwaInstall";
 
 export default function Login() {
   const { user, loading } = useAuth();
@@ -15,6 +16,7 @@ export default function Login() {
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const { canInstall, triggerInstall } = usePwaInstall();
   const utils = trpc.useUtils();
 
   useEffect(() => {
@@ -140,9 +142,22 @@ export default function Login() {
           </CardContent>
         </Card>
 
-        <p className="text-center text-xs text-slate-400">
-          نظام تقارير الزيارات الميدانية — بيئة إنتاجية
-        </p>
+        <div className="space-y-3 text-center">
+          {canInstall && (
+            <button
+              type="button"
+              onClick={() => triggerInstall()}
+              className="mx-auto flex items-center justify-center gap-1.5 text-xs font-bold text-[#0D625B] hover:text-[#094D48] hover:underline"
+            >
+              <Smartphone className="h-4 w-4" />
+              <span>تثبيت التطبيق على الشاشة الرئيسية للهاتف</span>
+            </button>
+          )}
+
+          <p className="text-center text-xs text-slate-400">
+            نظام تقارير الزيارات الميدانية — بيئة إنتاجية
+          </p>
+        </div>
       </div>
     </div>
   );

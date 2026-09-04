@@ -7,9 +7,10 @@ import { initials } from "@/lib/visits";
 import type { AppNavigationItem } from "@/lib/navigation";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { BriefcaseBusiness, LayoutDashboard, LogOut, PanelRight } from "lucide-react";
+import { BriefcaseBusiness, Download, LayoutDashboard, LogOut, PanelRight, Smartphone } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLocation } from "wouter";
+import { usePwaInstall } from "@/hooks/usePwaInstall";
 
 type DashboardLayoutProps = {
   title: string;
@@ -22,6 +23,7 @@ export default function DashboardLayout({ title, subtitle, navigation, children 
   const { loading, user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const isMobile = useIsMobile();
+  const { canInstall, triggerInstall } = usePwaInstall();
   const mobileSidebarPreview = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sidebar-preview");
 
   if (loading) {
@@ -88,6 +90,11 @@ export default function DashboardLayout({ title, subtitle, navigation, children 
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-52">
+              {canInstall && (
+                <DropdownMenuItem onClick={() => triggerInstall()} className="cursor-pointer text-[#0D625B] font-medium">
+                  <Smartphone className="ml-2 h-4 w-4" />تثبيت التطبيق على الجوال
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive"><LogOut className="ml-2 h-4 w-4" />تسجيل الخروج</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -100,6 +107,17 @@ export default function DashboardLayout({ title, subtitle, navigation, children 
             <h1 className="truncate text-lg font-extrabold tracking-tight text-[#153D3A] md:text-xl">{title}</h1>
             {subtitle ? <p className="mt-0.5 truncate text-xs text-slate-500 md:text-sm">{subtitle}</p> : null}
           </div>
+          {canInstall && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => triggerInstall()}
+              className="h-9 shrink-0 border-[#24746B]/30 bg-[#E5F3EF] text-xs font-bold text-[#0D625B] hover:bg-[#d5eee7] gap-1.5"
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">تثبيت التطبيق</span>
+            </Button>
+          )}
           <div className="hidden items-center gap-2 rounded-full border border-[#D6E8E4] bg-white px-3 py-1.5 text-xs font-medium text-[#25645E] sm:flex"><span className={`h-2 w-2 rounded-full ${isDemoUser ? "bg-[#D7A24A]" : "bg-[#71B58A]"}`} />{isDemoUser ? "وضع تجربة" : "متصل وآمن"}</div>
           {(isDemoUser || user.role === "admin") ? <Button variant="outline" onClick={switchExperience} className="h-9 shrink-0 border-[#BFDAD5] bg-white text-xs font-bold text-[#0D625B] hover:bg-[#EDF7F5] hover:text-[#094D48]">{isManagerView ? <><BriefcaseBusiness className="ml-1.5 h-4 w-4" />وضع المندوب</> : <><LayoutDashboard className="ml-1.5 h-4 w-4" />لوحة المدير</>}</Button> : null}
         </header>

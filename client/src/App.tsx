@@ -13,6 +13,8 @@ import ReportDetail from "./pages/ReportDetail";
 import ReportsHistory from "./pages/ReportsHistory";
 import VisitForm from "./pages/VisitForm";
 
+import PwaInstallPrompt from "./components/PwaInstallPrompt";
+
 function Router() {
   return <Switch>
     <Route path="/" component={Home} />
@@ -28,7 +30,17 @@ function Router() {
 }
 
 function App() {
-  return <ErrorBoundary><ThemeProvider defaultTheme="light"><TooltipProvider><Toaster richColors position="top-center" /><Router /></TooltipProvider></ThemeProvider></ErrorBoundary>;
+  return (
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="light">
+        <TooltipProvider>
+          <Toaster richColors position="top-center" />
+          <Router />
+          <PwaInstallPrompt />
+        </TooltipProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
+  );
 }
 
 export default App;
