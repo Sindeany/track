@@ -1,3 +1,4 @@
+import { safeStorage } from "@/lib/safeStorage";
 import { useEffect, useState } from "react";
 
 interface BeforeInstallPromptEvent extends Event {
@@ -20,11 +21,13 @@ export function usePwaInstall() {
 
     // Detect iOS
     const ua = window.navigator.userAgent;
-    const isIosDevice = /iPad|iPhone|iPod/.test(ua) && !(window as unknown as { MSStream?: unknown }).MSStream;
+    const isIosDevice =
+      (/iPad|iPhone|iPod/.test(ua) || (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1)) &&
+      !(window as unknown as { MSStream?: unknown }).MSStream;
     setIsIos(isIosDevice);
 
-    // Check dismissal in localStorage
-    const dismissedAt = localStorage.getItem("pwa_install_dismissed_at");
+    // Check dismissal in safeStorage
+    const dismissedAt = safeStorage.getItem("pwa_install_dismissed_at");
     if (dismissedAt) {
       const elapsedDays = (Date.now() - Number(dismissedAt)) / (1000 * 60 * 60 * 24);
       if (elapsedDays < 5) {
@@ -71,7 +74,7 @@ export function usePwaInstall() {
   };
 
   const dismiss = () => {
-    localStorage.setItem("pwa_install_dismissed_at", Date.now().toString());
+    safeStorage.setItem("pwa_install_dismissed_at", Date.now().toString());
     setIsDismissed(true);
   };
 

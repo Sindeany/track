@@ -18,6 +18,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(process.cwd(), "dist/public"),
     emptyOutDir: true,
+    target: ["es2020", "safari14", "ios14"],
   },
   server: {
     host: true,

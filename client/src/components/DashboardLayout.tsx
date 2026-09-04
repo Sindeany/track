@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { safeSessionStorage } from "@/lib/safeStorage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -48,7 +49,7 @@ export default function DashboardLayout({ title, subtitle, navigation, children 
   const switchExperience = () => {
     const target = isManagerView ? "/reports" : "/manager";
     if (isDemoUser) {
-      sessionStorage.setItem("field-visits-demo-role", isManagerView ? "user" : "admin");
+      safeSessionStorage.setItem("field-visits-demo-role", isManagerView ? "user" : "admin");
       window.location.assign(target);
       return;
     }

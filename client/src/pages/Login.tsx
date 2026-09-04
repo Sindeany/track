@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { safeSessionStorage } from "@/lib/safeStorage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -27,9 +28,7 @@ export default function Login() {
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: async result => {
-      if (typeof window !== "undefined") {
-        sessionStorage.removeItem("field-visits-demo-role");
-      }
+      safeSessionStorage.removeItem("field-visits-demo-role");
       await utils.auth.me.invalidate();
       toast.success(`مرحبًا بك، ${result.user.name || result.user.openId}`);
       setLocation(result.user.role === "admin" ? "/manager" : "/reports");

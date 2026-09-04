@@ -13,7 +13,18 @@ export default function Home() {
     if (user) setLocation("/reports");
   }, [user, setLocation]);
 
-  if (loading || user) return <div className="min-h-screen bg-[#F4F7F7]" />;
+  if (loading || user) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#F4F7F7]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#104946] font-black text-[#D8FFB6] shadow-sm">
+            زم
+          </div>
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#104946] border-t-transparent" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen overflow-hidden bg-[#F4F7F7] text-right" dir="rtl">

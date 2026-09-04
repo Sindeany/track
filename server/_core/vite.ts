@@ -60,8 +60,16 @@ export function serveStatic(app: Express) {
 
   app.use(express.static(distPath));
 
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  // fall through to index.html for page navigations, but 404 for missing assets
+  app.use("*", (req, res) => {
+    const reqPath = req.originalUrl || req.url || "";
+    if (
+      reqPath.startsWith("/assets/") ||
+      reqPath.startsWith("/api/") ||
+      reqPath.match(/\.(js|css|json|png|jpg|jpeg|svg|webp|ico|woff|woff2)$/i)
+    ) {
+      return res.status(404).type("text/plain").send("Not Found");
+    }
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }

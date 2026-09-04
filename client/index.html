@@ -15,10 +15,52 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
     <title>زيارة ميدانية | تقارير المبيعات</title>
+
+    <!-- Self-healing resilience script for Safari iOS & stale service worker caches -->
+    <script>
+      (function() {
+        window.addEventListener('error', function(e) {
+          var msg = (e && (e.message || (e.error && e.error.message))) || '';
+          if (
+            msg.indexOf('Unexpected token') !== -1 ||
+            msg.indexOf('Failed to fetch dynamically imported module') !== -1 ||
+            msg.indexOf('Loading chunk') !== -1 ||
+            msg.indexOf('client.navigate') !== -1
+          ) {
+            try {
+              if (!sessionStorage.getItem('safari_cache_recovery_run')) {
+                sessionStorage.setItem('safari_cache_recovery_run', '1');
+                if (window.caches) {
+                  caches.keys().then(function(names) {
+                    names.forEach(function(n) { caches.delete(n); });
+                  });
+                }
+                if (navigator.serviceWorker) {
+                  navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    regs.forEach(function(r) { r.unregister(); });
+                  });
+                }
+                setTimeout(function() { window.location.reload(); }, 100);
+              }
+            } catch (err) {
+              // Ignore storage errors in restricted private mode
+            }
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Branded initial shell to eliminate any blank white screen while scripts load -->
+      <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background-color: #F4F7F7; font-family: 'Tajawal', system-ui, -apple-system, sans-serif; direction: rtl;">
+        <div style="text-align: center; padding: 24px;">
+          <div style="width: 52px; height: 52px; margin: 0 auto 16px; background: #104946; color: #D8FFB6; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 22px; box-shadow: 0 10px 25px -5px rgba(16,73,70,0.3);">زم</div>
+          <div style="color: #153D3A; font-weight: 800; font-size: 17px; margin-bottom: 6px;">زيارة ميدانية</div>
+          <div style="color: #64748B; font-size: 13px;">جارٍ تشغيل النظام...</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
-    <script defer src="%VITE_ANALYTICS_ENDPOINT%/umami" data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
   </body>
 </html>
