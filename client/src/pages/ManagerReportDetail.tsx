@@ -1,6 +1,16 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
 import PhotoLightbox from "@/components/PhotoLightbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,23 +19,340 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime, mapUrl, purposeLabels } from "@/lib/visits";
 import { managerNavigation, representativeNavigation } from "@/lib/navigation";
-import { ArrowRight, CalendarDays, Camera, ExternalLink, MapPin, Maximize2, MessageSquareText, Phone, Send, UserRound } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarDays,
+  Camera,
+  ExternalLink,
+  Loader2,
+  MapPin,
+  Maximize2,
+  MessageSquareText,
+  Phone,
+  Send,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { FormEvent, useState } from "react";
 import { toast } from "sonner";
-import { Link, useRoute } from "wouter";
+import { Link, useLocation, useRoute } from "wouter";
 
 export default function ManagerReportDetail() {
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const [, params] = useRoute("/manager/reports/:id");
   const id = Number(params?.id || 0);
   const [comment, setComment] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const utils = trpc.useUtils();
-  const { data: report, isLoading, error } = trpc.visits.managerGet.useQuery({ id }, { enabled: id > 0 && user?.role === "admin" });
-  const addComment = trpc.visits.addComment.useMutation({ onSuccess: async () => { setComment(""); await utils.visits.managerGet.invalidate({ id }); await utils.visits.managerList.invalidate(); toast.success("تمت إضافة ملاحظة المدير."); }, onError: error => toast.error(error.message) });
-  function submit(event: FormEvent) { event.preventDefault(); if (comment.trim()) addComment.mutate({ visitId: id, body: comment }); }
-  if (user && user.role !== "admin") return <DashboardLayout title="تفاصيل التقرير" navigation={representativeNavigation}><Card><CardContent className="p-10 text-center">غير مصرح لك بمراجعة هذا التقرير.</CardContent></Card></DashboardLayout>;
-  if (isLoading) return <DashboardLayout title="تفاصيل التقرير" navigation={managerNavigation}><Skeleton className="h-120 rounded-3xl" /></DashboardLayout>;
-  if (error || !report) return <DashboardLayout title="تفاصيل التقرير" navigation={managerNavigation}><Card><CardContent className="p-10 text-center"><h2 className="font-bold">تعذر العثور على التقرير</h2><Link href="/manager" className="mt-4 inline-block text-sm font-bold text-[#0D756B]">العودة للوحة المدير</Link></CardContent></Card></DashboardLayout>;
-  return <DashboardLayout title="مراجعة تقرير" subtitle={`تقرير الزيارة #${report.id}`} navigation={managerNavigation}><section className="mx-auto max-w-6xl space-y-5"><Link href="/manager" className="inline-flex items-center text-sm font-bold text-[#0D756B]"><ArrowRight className="ml-1 h-4 w-4" />العودة للوحة المدير</Link><Card className="overflow-hidden border-0 bg-[#104946] text-white"><CardContent className="p-5 md:p-7"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div><Badge className="border-0 bg-[#D8FFB6] text-[#0B4C46]">{purposeLabels[report.visitPurpose]}</Badge><h2 className="mt-4 text-2xl font-extrabold">{report.clientName}</h2><p className="mt-2 text-sm text-white/65">{report.address}</p></div><div className="space-y-2 rounded-xl border border-white/10 bg-white/8 p-3 text-xs"><span className="flex items-center text-white/65"><UserRound className="ml-1.5 h-3.5 w-3.5 text-[#D8FFB6]" />المندوب</span><strong className="block text-sm">{report.representativeName || "مندوب مبيعات"}</strong><span className="flex items-center pt-1 text-white/75"><CalendarDays className="ml-1.5 h-3.5 w-3.5 text-[#D8FFB6]" />{formatDateTime(report.visitedAt)}</span></div></div></CardContent></Card><div className="grid gap-5 lg:grid-cols-[1.35fr_.65fr]"><div className="space-y-5"><Card><CardContent className="p-5 md:p-6"><h3 className="font-extrabold text-[#153D3A]">تقرير الزيارة</h3><p className="mt-4 whitespace-pre-wrap text-sm leading-8 text-slate-600">{report.report}</p></CardContent></Card><Card><CardContent className="p-5 md:p-6"><div className="flex items-center gap-2"><Camera className="h-4 w-4 text-[#27766D]" /><h3 className="font-extrabold text-[#153D3A]">صور الزيارة</h3></div>{report.photos.length ? <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{report.photos.map((photo, index) => <button key={photo.id} type="button" onClick={() => setLightboxIndex(index)} className="group relative overflow-hidden rounded-xl border border-[#DCE8E5] bg-slate-100 text-right transition-all hover:border-[#0D756B] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#0D756B]" aria-label={`استعراض صورة الزيارة ${index + 1}`}><img src={photo.objectUrl} alt={`صورة الزيارة ${index + 1}`} className="aspect-square w-full object-cover transition duration-300 group-hover:scale-105" /><div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/20" /><div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-slate-950/70 px-2 py-1 text-[11px] font-bold text-white shadow backdrop-blur-sm"><Maximize2 className="h-3 w-3" /><span>عرض</span></div></button>)}</div> : <p className="mt-4 text-sm text-slate-500">لا توجد صور مرفقة.</p>}</CardContent></Card></div><div className="space-y-5"><Card><CardContent className="space-y-4 p-5"><h3 className="font-extrabold text-[#153D3A]">بيانات الاتصال</h3><div className="flex gap-3"><UserRound className="mt-0.5 h-4 w-4 text-[#5C968F]" /><div><p className="text-sm font-semibold">{report.employeeName}</p><p className="mt-0.5 text-xs text-slate-500">{report.employeeRole}</p></div></div><a href={`tel:${report.phone}`} className="flex items-center gap-3 text-sm font-semibold text-[#0D756B]"><Phone className="h-4 w-4" /><span dir="ltr">{report.phone}</span></a></CardContent></Card><Card><CardContent className="space-y-3 p-5"><h3 className="font-extrabold text-[#153D3A]">الموقع الموثّق</h3><div className="flex gap-3"><MapPin className="mt-0.5 h-4 w-4 text-[#5C968F]" /><p className="text-xs leading-6 text-slate-500">{Number(report.latitude).toFixed(6)}, {Number(report.longitude).toFixed(6)}{report.locationAccuracy ? <span className="block">دقة تقريبية: {report.locationAccuracy} م</span> : null}</p></div><a href={mapUrl(report.latitude, report.longitude)} target="_blank" rel="noreferrer"><Button variant="outline" className="w-full border-[#BFDAD5] text-[#0D756B] hover:bg-[#EDF7F5]"><ExternalLink className="ml-2 h-4 w-4" />فتح في الخرائط</Button></a></CardContent></Card><Card className="border-[#C6DFDA] bg-[#FBFEFD]"><CardContent className="p-5"><div className="flex items-center gap-2"><MessageSquareText className="h-4 w-4 text-[#27766D]" /><h3 className="font-extrabold text-[#153D3A]">ملاحظات المدير</h3></div>{report.comments.length ? <div className="mt-4 space-y-3">{report.comments.map(item => <div key={item.id} className="rounded-xl bg-[#EDF6F4] p-3"><p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.body}</p><p className="mt-2 text-[11px] text-slate-400">{formatDateTime(item.createdAt)}</p></div>)}</div> : null}<form onSubmit={submit} className="mt-4 space-y-3"><Textarea value={comment} onChange={e => setComment(e.target.value)} className="min-h-26 resize-none" placeholder="اكتب ملاحظة أو توجيهًا للمندوب..." /><Button type="submit" disabled={!comment.trim() || addComment.isPending} className="w-full bg-[#0D625B] hover:bg-[#094D48]">{addComment.isPending ? "جارٍ الإضافة" : <><Send className="ml-2 h-4 w-4" />إضافة ملاحظة</>}</Button></form></CardContent></Card></div></div><PhotoLightbox photos={report.photos.map((p, i) => ({ id: p.id, url: p.objectUrl, title: `صورة الزيارة #${report.id} (${i + 1} من ${report.photos.length})` }))} initialIndex={lightboxIndex ?? 0} isOpen={lightboxIndex !== null} onClose={() => setLightboxIndex(null)} /></section></DashboardLayout>;
+
+  const { data: report, isLoading, error } = trpc.visits.managerGet.useQuery(
+    { id },
+    { enabled: id > 0 && user?.role === "admin" }
+  );
+
+  const addComment = trpc.visits.addComment.useMutation({
+    onSuccess: async () => {
+      setComment("");
+      await utils.visits.managerGet.invalidate({ id });
+      await utils.visits.managerList.invalidate();
+      toast.success("تمت إضافة ملاحظة المدير.");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const deleteVisitMutation = trpc.visits.delete.useMutation({
+    onSuccess: async () => {
+      toast.success("تم حذف تقرير الزيارة بنجاح.");
+      await utils.visits.managerList.invalidate();
+      setLocation("/manager");
+    },
+    onError: (error) => {
+      toast.error(error.message || "تعذر حذف التقرير.");
+    },
+  });
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (comment.trim()) addComment.mutate({ visitId: id, body: comment });
+  }
+
+  if (user && user.role !== "admin") {
+    return (
+      <DashboardLayout title="تفاصيل التقرير" navigation={representativeNavigation}>
+        <Card>
+          <CardContent className="p-10 text-center">غير مصرح لك بمراجعة هذا التقرير.</CardContent>
+        </Card>
+      </DashboardLayout>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <DashboardLayout title="تفاصيل التقرير" navigation={managerNavigation}>
+        <Skeleton className="h-120 rounded-3xl" />
+      </DashboardLayout>
+    );
+  }
+
+  if (error || !report) {
+    return (
+      <DashboardLayout title="تفاصيل التقرير" navigation={managerNavigation}>
+        <Card>
+          <CardContent className="p-10 text-center">
+            <h2 className="font-bold">تعذر العثور على التقرير</h2>
+            <Link href="/manager" className="mt-4 inline-block text-sm font-bold text-[#0D756B]">
+              العودة للوحة المدير
+            </Link>
+          </CardContent>
+        </Card>
+      </DashboardLayout>
+    );
+  }
+
+  return (
+    <DashboardLayout
+      title="مراجعة تقرير"
+      subtitle={`تقرير الزيارة #${report.id}`}
+      navigation={managerNavigation}
+    >
+      <section className="mx-auto max-w-6xl space-y-5">
+        <div className="flex items-center justify-between">
+          <Link
+            href="/manager"
+            className="inline-flex items-center text-sm font-bold text-[#0D756B] transition hover:text-[#094D48]"
+          >
+            <ArrowRight className="ml-1 h-4 w-4" />
+            العودة للوحة المدير
+          </Link>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDeleteDialogOpen(true)}
+            className="border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 font-bold gap-1.5"
+          >
+            <Trash2 className="h-4 w-4" />
+            <span>حذف التقرير</span>
+          </Button>
+        </div>
+
+        <Card className="overflow-hidden border-0 bg-[#104946] text-white">
+          <CardContent className="p-5 md:p-7">
+            <div className="flex flex-col justify-between gap-4 sm:flex-row">
+              <div>
+                <Badge className="border-0 bg-[#D8FFB6] text-[#0B4C46]">
+                  {purposeLabels[report.visitPurpose]}
+                </Badge>
+                <h2 className="mt-4 text-2xl font-extrabold">{report.clientName}</h2>
+                <p className="mt-2 text-sm text-white/65">{report.address}</p>
+              </div>
+              <div className="space-y-2 rounded-xl border border-white/10 bg-white/8 p-3 text-xs">
+                <span className="flex items-center text-white/65">
+                  <UserRound className="ml-1.5 h-3.5 w-3.5 text-[#D8FFB6]" />
+                  المندوب
+                </span>
+                <strong className="block text-sm">
+                  {report.representativeName || "مندوب مبيعات"}
+                </strong>
+                <span className="flex items-center pt-1 text-white/75">
+                  <CalendarDays className="ml-1.5 h-3.5 w-3.5 text-[#D8FFB6]" />
+                  {formatDateTime(report.visitedAt)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-5 lg:grid-cols-[1.35fr_.65fr]">
+          <div className="space-y-5">
+            <Card>
+              <CardContent className="p-5 md:p-6">
+                <h3 className="font-extrabold text-[#153D3A]">تقرير الزيارة</h3>
+                <p className="mt-4 whitespace-pre-wrap text-sm leading-8 text-slate-600">
+                  {report.report}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-5 md:p-6">
+                <div className="flex items-center gap-2">
+                  <Camera className="h-4 w-4 text-[#27766D]" />
+                  <h3 className="font-extrabold text-[#153D3A]">صور الزيارة</h3>
+                </div>
+                {report.photos.length ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {report.photos.map((photo, index) => (
+                      <button
+                        key={photo.id}
+                        type="button"
+                        onClick={() => setLightboxIndex(index)}
+                        className="group relative overflow-hidden rounded-xl border border-[#DCE8E5] bg-slate-100 text-right transition-all hover:border-[#0D756B] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#0D756B]"
+                        aria-label={`استعراض صورة الزيارة ${index + 1}`}
+                      >
+                        <img
+                          src={photo.objectUrl}
+                          alt={`صورة الزيارة ${index + 1}`}
+                          className="aspect-square w-full object-cover transition duration-300 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/20" />
+                        <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-slate-950/70 px-2 py-1 text-[11px] font-bold text-white shadow backdrop-blur-sm">
+                          <Maximize2 className="h-3 w-3" />
+                          <span>عرض</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-4 text-sm text-slate-500">لا توجد صور مرفقة.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-5">
+            <Card>
+              <CardContent className="space-y-4 p-5">
+                <h3 className="font-extrabold text-[#153D3A]">بيانات الاتصال</h3>
+                <div className="flex gap-3">
+                  <UserRound className="mt-0.5 h-4 w-4 text-[#5C968F]" />
+                  <div>
+                    <p className="text-sm font-semibold">{report.employeeName}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{report.employeeRole}</p>
+                  </div>
+                </div>
+                <a
+                  href={`tel:${report.phone}`}
+                  className="flex items-center gap-3 text-sm font-semibold text-[#0D756B]"
+                >
+                  <Phone className="h-4 w-4" />
+                  <span dir="ltr">{report.phone}</span>
+                </a>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="space-y-3 p-5">
+                <h3 className="font-extrabold text-[#153D3A]">الموقع الموثّق</h3>
+                <div className="flex gap-3">
+                  <MapPin className="mt-0.5 h-4 w-4 text-[#5C968F]" />
+                  <p className="text-xs leading-6 text-slate-500">
+                    {Number(report.latitude).toFixed(6)}, {Number(report.longitude).toFixed(6)}
+                    {report.locationAccuracy ? (
+                      <span className="block">دقة تقريبية: {report.locationAccuracy} م</span>
+                    ) : null}
+                  </p>
+                </div>
+                <a
+                  href={mapUrl(report.latitude, report.longitude)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Button
+                    variant="outline"
+                    className="w-full border-[#BFDAD5] text-[#0D756B] hover:bg-[#EDF7F5]"
+                  >
+                    <ExternalLink className="ml-2 h-4 w-4" />
+                    فتح في الخرائط
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+
+            <Card className="border-[#C6DFDA] bg-[#FBFEFD]">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2">
+                  <MessageSquareText className="h-4 w-4 text-[#27766D]" />
+                  <h3 className="font-extrabold text-[#153D3A]">ملاحظات المدير</h3>
+                </div>
+                {report.comments.length ? (
+                  <div className="mt-4 space-y-3">
+                    {report.comments.map((item) => (
+                      <div key={item.id} className="rounded-xl bg-[#EDF6F4] p-3">
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                          {item.body}
+                        </p>
+                        <p className="mt-2 text-[11px] text-slate-400">
+                          {formatDateTime(item.createdAt)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <form onSubmit={submit} className="mt-4 space-y-3">
+                  <Textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    className="min-h-26 resize-none"
+                    placeholder="اكتب ملاحظة أو توجيهًا للمندوب..."
+                  />
+                  <Button
+                    type="submit"
+                    disabled={!comment.trim() || addComment.isPending}
+                    className="w-full bg-[#0D625B] hover:bg-[#094D48]"
+                  >
+                    {addComment.isPending ? (
+                      "جارٍ الإضافة"
+                    ) : (
+                      <>
+                        <Send className="ml-2 h-4 w-4" />
+                        إضافة ملاحظة
+                      </>
+                    )}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        <PhotoLightbox
+          photos={report.photos.map((p, i) => ({
+            id: p.id,
+            url: p.objectUrl,
+            title: `صورة الزيارة #${report.id} (${i + 1} من ${report.photos.length})`,
+          }))}
+          initialIndex={lightboxIndex ?? 0}
+          isOpen={lightboxIndex !== null}
+          onClose={() => setLightboxIndex(null)}
+        />
+
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent dir="rtl" className="max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                <Trash2 className="h-5 w-5" />
+                <span>تأكيد حذف التقرير</span>
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-slate-600 leading-6 text-sm">
+                هل أنت متأكد من رغبتك في حذف تقرير الزيارة لعميل <strong>"{report.clientName}"</strong> نهائيًا؟
+                <span className="block mt-2.5 font-medium text-amber-900 bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs leading-5">
+                  ⚠️ تنبيه: سيتم حذف كافة بيانات الزيارة والملاحظات الإدارية والصور المرفقة ({report.photos.length} صورة) من السيرفر نهائيًا ولا يمكن التراجع عن هذا الإجراء.
+                </span>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-row-reverse justify-start gap-2 pt-3">
+              <AlertDialogCancel disabled={deleteVisitMutation.isPending}>إلغاء</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault();
+                  deleteVisitMutation.mutate({ id });
+                }}
+                disabled={deleteVisitMutation.isPending}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90 gap-1.5 font-bold"
+              >
+                {deleteVisitMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                <span>حذف نهائي</span>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </section>
+    </DashboardLayout>
+  );
 }

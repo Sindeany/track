@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addVisitComment, addVisitPhotos, createVisit, getVisitForManager, getVisitForRepresentative, listVisitsForManager, listVisitsForRepresentative, upsertClientFromVisit } from "../db";
+import { addVisitComment, addVisitPhotos, createVisit, deleteVisit, getVisitForManager, getVisitForRepresentative, listVisitsForManager, listVisitsForRepresentative, upsertClientFromVisit } from "../db";
 import { storagePut } from "../storage";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 
@@ -89,5 +89,11 @@ export const visitsRouter = router({
     if (!visit) throw new TRPCError({ code: "NOT_FOUND", message: "لم يتم العثور على التقرير." });
     await addVisitComment({ visitId: input.visitId, managerId: ctx.user.id, body: input.body });
     return { success: true };
+  }),
+  delete: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+    const visit = await getVisitForManager(input.id);
+    if (!visit) throw new TRPCError({ code: "NOT_FOUND", message: "لم يتم العثور على التقرير." });
+    await deleteVisit(input.id);
+    return { success: true, id: input.id };
   }),
 });

@@ -37,3 +37,16 @@ export async function storageGet(relKey: string) {
 export async function storageGetSignedUrl(relKey: string) {
   return (await storageGet(relKey)).url;
 }
+
+export async function storageDelete(relKey: string): Promise<void> {
+  try {
+    const key = safeKey(relKey);
+    const target = path.join(uploadRoot, key);
+    await fs.unlink(target);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[Storage] Failed to delete file ${relKey}:`, err);
+    }
+  }
+}
+

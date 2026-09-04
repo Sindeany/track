@@ -158,4 +158,27 @@ describe("Staff Management and KPIs Router", () => {
       })
     ).rejects.toThrow("تم تجميد هذا الحساب من قبل الإدارة");
   });
+
+  it("allows admin to delete a staff user", async () => {
+    vi.spyOn(db, "getUserById").mockResolvedValueOnce(repUser as any);
+    const deleteSpy = vi.spyOn(db, "deleteStaffUser").mockResolvedValueOnce(true);
+
+    const caller = appRouter.createCaller(createMockContext(adminUser));
+    const result = await caller.auth.deleteStaff({ id: 2 });
+
+    expect(result.success).toBe(true);
+    expect(result.id).toBe(2);
+    expect(deleteSpy).toHaveBeenCalledWith(2, adminUser.id);
+  });
+
+  it("prevents admin from deleting their own account", async () => {
+    const caller = appRouter.createCaller(createMockContext(adminUser));
+    await expect(caller.auth.deleteStaff({ id: 1 })).rejects.toThrow("لا يمكن للمدير حذف حسابه الحالي");
+  });
+
+  it("blocks non-admin user from deleting staff", async () => {
+    const caller = appRouter.createCaller(createMockContext(repUser));
+    await expect(caller.auth.deleteStaff({ id: 3 })).rejects.toThrow("You do not have required permission");
+  });
 });
+

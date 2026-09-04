@@ -5,7 +5,7 @@ import { createSessionToken, hashPassword, verifyPassword } from "./_core/auth";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
-import { createUserWithPassword, getUserById, getUserByLogin, getUserByOpenId, listRepresentatives, listStaffWithKPIs, resetStaffPassword, updateStaffUser, updateUserLastSignedIn } from "./db";
+import { createUserWithPassword, deleteStaffUser, getUserById, getUserByLogin, getUserByOpenId, listRepresentatives, listStaffWithKPIs, resetStaffPassword, updateStaffUser, updateUserLastSignedIn } from "./db";
 import { clientsRouter } from "./routers/clients";
 import { visitsRouter } from "./routers/visits";
 
@@ -153,6 +153,22 @@ export const appRouter = router({
         const newHash = hashPassword(input.newPassword);
         await resetStaffPassword(input.userId, newHash);
         return { success: true as const, message: "تم إعادة تعيين كلمة المرور بنجاح." };
+      }),
+    deleteStaff: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        if (input.id === ctx.user.id) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "لا يمكن للمدير حذف حسابه الحالي.",
+          });
+        }
+        const targetUser = await getUserById(input.id);
+        if (!targetUser) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "الموظف غير موجود." });
+        }
+        await deleteStaffUser(input.id, ctx.user.id);
+        return { success: true as const, id: input.id };
       }),
   }),
   visits: visitsRouter,

@@ -2,6 +2,7 @@ import { asc, desc, eq, inArray, like, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { clients, InsertClient, InsertUser, InsertVisit, users, visitComments, visitPhotos, visits } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { storageDelete } from "./storage";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -210,6 +211,25 @@ export async function resetStaffPassword(id: number, passwordHash: string) {
   return true;
 }
 
+export async function deleteStaffUser(id: number, currentAdminId: number) {
+  if (id === currentAdminId) {
+    throw new Error("لا يمكن حذف الحساب الحالي الذي تم تسجيل الدخول به.");
+  }
+  const db = requireDb(await getDb());
+
+  // Delete physical photos of all visits belonging to this staff member
+  const staffVisits = await db.select({ id: visits.id }).from(visits).where(eq(visits.representativeId, id));
+  if (staffVisits.length > 0) {
+    const visitIds = staffVisits.map(v => v.id);
+    const photos = await db.select().from(visitPhotos).where(inArray(visitPhotos.visitId, visitIds));
+    await Promise.all(photos.map(p => storageDelete(p.objectKey)));
+  }
+
+  // Deleting user cascades down to visits, visitPhotos, and visitComments in MySQL
+  await db.delete(users).where(eq(users.id, id));
+  return true;
+}
+
 export async function getOrCreateDemoUser(role: "user" | "admin") {
   const db = requireDb(await getDb());
   const demo = role === "admin"
@@ -323,6 +343,18 @@ export async function getVisitForManager(id: number) {
     representativeEmail: users.email,
   }).from(visits).innerJoin(users, eq(visits.representativeId, users.id)).where(eq(visits.id, id)).limit(1);
   return rows[0] ? (await hydrateVisits(rows))[0] : undefined;
+}
+
+export async function deleteVisit(id: number) {
+  const db = requireDb(await getDb());
+
+  // Delete physical photos from disk
+  const photos = await db.select().from(visitPhotos).where(eq(visitPhotos.visitId, id));
+  await Promise.all(photos.map(p => storageDelete(p.objectKey)));
+
+  // Deleting visit cascades down to visitPhotos and visitComments in MySQL
+  await db.delete(visits).where(eq(visits.id, id));
+  return true;
 }
 
 export async function searchClients(query = "") {

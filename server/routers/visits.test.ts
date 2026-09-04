@@ -95,6 +95,31 @@ describe("strict manager permissions enforcement via adminProcedure", () => {
       message: UNAUTHED_ERR_MSG,
     });
   });
+
+  it("strictly rejects regular users from deleting a visit", async () => {
+    const caller = appRouter.createCaller(createTestContext("user"));
+    await expect(caller.visits.delete({ id: 1 })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: NOT_ADMIN_ERR_MSG,
+    });
+  });
+
+  it("allows admin to delete a visit", async () => {
+    const db = await import("../db");
+    const { vi } = await import("vitest");
+    vi.spyOn(db, "getVisitForManager").mockResolvedValueOnce({
+      id: 1,
+      clientName: "شركة النور",
+    } as any);
+    const deleteSpy = vi.spyOn(db, "deleteVisit").mockResolvedValueOnce(true);
+
+    const caller = appRouter.createCaller(createTestContext("admin"));
+    const result = await caller.visits.delete({ id: 1 });
+
+    expect(result.success).toBe(true);
+    expect(result.id).toBe(1);
+    expect(deleteSpy).toHaveBeenCalledWith(1);
+  });
 });
 
 

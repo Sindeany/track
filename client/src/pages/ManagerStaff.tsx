@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,6 +21,7 @@ import {
   Lock,
   Search,
   ShieldAlert,
+  Trash2,
   TrendingUp,
   UserCheck,
   UserPlus,
@@ -38,6 +40,7 @@ export default function ManagerStaff() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
+  const [staffToDelete, setStaffToDelete] = useState<{ id: number; name: string; visitsCount: number } | null>(null);
 
   // Form States
   const [newRep, setNewRep] = useState({ openId: "", name: "", email: "", password: "", role: "user" as "user" | "admin" });
@@ -82,6 +85,17 @@ export default function ManagerStaff() {
     },
     onError: err => {
       toast.error(err.message || "تعذر إعادة تعيين كلمة المرور.");
+    },
+  });
+
+  const deleteStaffMutation = trpc.auth.deleteStaff.useMutation({
+    onSuccess: () => {
+      toast.success(`تم حذف المندوب (${staffToDelete?.name}) وكافة بياناته بنجاح.`);
+      setStaffToDelete(null);
+      refetch();
+    },
+    onError: err => {
+      toast.error(err.message || "تعذر حذف المندوب.");
     },
   });
 
@@ -438,20 +452,34 @@ export default function ManagerStaff() {
                         </Button>
 
                         {!isCurrentUser && (
-                          <Button
-                            size="sm"
-                            variant={staff.isActive ? "ghost" : "default"}
-                            onClick={() => handleToggleStatus(staff)}
-                            disabled={updateUserMutation.isPending}
-                            className={`text-xs h-8 px-2.5 ${
-                              staff.isActive
-                                ? "text-rose-600 hover:bg-rose-50 hover:text-rose-700"
-                                : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                            }`}
-                            title={staff.isActive ? "تجميد الحساب" : "تفعيل الحساب"}
-                          >
-                            {staff.isActive ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
-                          </Button>
+                          <>
+                            <Button
+                              size="sm"
+                              variant={staff.isActive ? "ghost" : "default"}
+                              onClick={() => handleToggleStatus(staff)}
+                              disabled={updateUserMutation.isPending}
+                              className={`text-xs h-8 px-2.5 ${
+                                staff.isActive
+                                  ? "text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                              }`}
+                              title={staff.isActive ? "تجميد الحساب" : "تفعيل الحساب"}
+                            >
+                              {staff.isActive ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setStaffToDelete({ id: staff.id, name: staff.name || staff.openId, visitsCount: staff.totalVisits })}
+                              disabled={deleteStaffMutation.isPending}
+                              className="text-xs h-8 px-2 text-rose-600 hover:bg-rose-100 hover:text-rose-800 transition-colors"
+                              title="حذف المندوب نهائيًا"
+                              aria-label={`حذف المندوب ${staff.name || staff.openId}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
                         )}
                       </div>
                     </CardContent>
@@ -665,6 +693,45 @@ export default function ManagerStaff() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* AlertDialog: Confirm Staff Deletion */}
+      <AlertDialog open={Boolean(staffToDelete)} onOpenChange={open => !open && setStaffToDelete(null)}>
+        <AlertDialogContent dir="rtl" className="text-right sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" />
+              <span>تأكيد حذف المندوب</span>
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 leading-6 text-sm">
+              هل أنت متأكد من رغبتك في حذف المندوب <strong>"{staffToDelete?.name}"</strong> نهائيًا؟
+              <br />
+              {staffToDelete && staffToDelete.visitsCount > 0 ? (
+                <span className="block mt-2.5 font-medium text-amber-900 bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs leading-5">
+                  ⚠️ تنبيه هام: سيتم حذف كافة الزيارات والتقارير المرتبطة بهذا المندوب (عددها {staffToDelete.visitsCount} تقرير) مع كافة الصور المرفقة من السيرفر نهائيًا.
+                </span>
+              ) : (
+                <span className="block mt-2 text-xs text-slate-500">
+                  لا توجد زيارات مسجلة لهذا المندوب في النظام حالياً.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row-reverse justify-start gap-2 pt-3">
+            <AlertDialogCancel disabled={deleteStaffMutation.isPending}>إلغاء</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (staffToDelete) deleteStaffMutation.mutate({ id: staffToDelete.id });
+              }}
+              disabled={deleteStaffMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 gap-1.5 font-bold"
+            >
+              {deleteStaffMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              <span>حذف نهائي</span>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
