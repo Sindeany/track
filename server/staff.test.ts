@@ -79,6 +79,19 @@ describe("Staff Management and KPIs Router", () => {
   });
 
   it("allows admin to update user details and active state", async () => {
+    vi.spyOn(db, "getUserById").mockResolvedValueOnce({
+      id: 2,
+      openId: "rep1",
+      name: "أحمد علي محدث",
+      email: "ahmad_new@sindean.com",
+      role: "user",
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+      loginMethod: "password",
+    });
+    vi.spyOn(db, "getUserByEmail").mockResolvedValueOnce(undefined);
     vi.spyOn(db, "updateStaffUser").mockResolvedValueOnce({
       id: 2,
       openId: "rep1",
@@ -161,6 +174,7 @@ describe("Staff Management and KPIs Router", () => {
 
   it("allows admin to delete a staff user", async () => {
     vi.spyOn(db, "getUserById").mockResolvedValueOnce(repUser as any);
+    vi.spyOn(db, "countVisitsForRepresentative").mockResolvedValueOnce(0);
     const deleteSpy = vi.spyOn(db, "deleteStaffUser").mockResolvedValueOnce(true);
 
     const caller = appRouter.createCaller(createMockContext(adminUser));
@@ -179,6 +193,31 @@ describe("Staff Management and KPIs Router", () => {
   it("blocks non-admin user from deleting staff", async () => {
     const caller = appRouter.createCaller(createMockContext(repUser));
     await expect(caller.auth.deleteStaff({ id: 3 })).rejects.toThrow("You do not have required permission");
+  });
+
+  it("rejects deleting, suspending, or demoting the last administrator", async () => {
+    const otherAdmin = { ...adminUser, id: 9, openId: "other-admin" };
+    vi.spyOn(db, "getUserById").mockResolvedValue(otherAdmin as any);
+    vi.spyOn(db, "countAdmins").mockResolvedValue(1);
+    const deleteSpy = vi.spyOn(db, "deleteStaffUser").mockResolvedValue(true);
+    const updateSpy = vi.spyOn(db, "updateStaffUser").mockResolvedValue(otherAdmin as any);
+    const caller = appRouter.createCaller(createMockContext(adminUser));
+
+    await expect(caller.auth.deleteStaff({ id: 9 })).rejects.toThrow("آخر مدير");
+    await expect(caller.auth.updateUser({ id: 9, isActive: false })).rejects.toThrow("آخر مدير");
+    await expect(caller.auth.updateUser({ id: 9, role: "user" })).rejects.toThrow("آخر مدير");
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects deleting a representative who still has visit reports", async () => {
+    vi.spyOn(db, "getUserById").mockResolvedValueOnce(repUser as any);
+    vi.spyOn(db, "countVisitsForRepresentative").mockResolvedValueOnce(3);
+    const deleteSpy = vi.spyOn(db, "deleteStaffUser").mockResolvedValueOnce(true);
+    const caller = appRouter.createCaller(createMockContext(adminUser));
+
+    await expect(caller.auth.deleteStaff({ id: 2 })).rejects.toThrow("تقارير زيارات");
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 });
 

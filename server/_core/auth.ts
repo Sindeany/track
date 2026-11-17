@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
-import { ENV } from "./env";
-
-const THIRTY_DAYS_MS = 1000 * 60 * 60 * 24 * 30;
+import { SESSION_TTL_MS } from "@shared/const";
+import { getCookieSecret } from "./env";
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -29,17 +28,19 @@ export function verifyPassword(password: string, combined: string | null | undef
 export type SessionPayload = {
   userId: number;
   role: "user" | "admin";
+  sv: number;
   exp: number;
 };
 
 export function createSessionToken(
-  params: { userId: number; role: "user" | "admin" },
-  secret: string = ENV.cookieSecret || "field-visits-default-secret",
-  expiresInMs: number = THIRTY_DAYS_MS,
+  params: { userId: number; role: "user" | "admin"; sessionVersion?: number },
+  secret: string = getCookieSecret(),
+  expiresInMs: number = SESSION_TTL_MS,
 ): string {
   const payload: SessionPayload = {
     userId: params.userId,
     role: params.role,
+    sv: params.sessionVersion ?? 0,
     exp: Date.now() + expiresInMs,
   };
 
@@ -54,7 +55,7 @@ export function createSessionToken(
 
 export function verifySessionToken(
   token: string | null | undefined,
-  secret: string = ENV.cookieSecret || "field-visits-default-secret",
+  secret: string = getCookieSecret(),
 ): SessionPayload | null {
   if (!token || typeof token !== "string") return null;
   const [payloadEncoded, signature] = token.split(".");
@@ -76,6 +77,7 @@ export function verifySessionToken(
     const payload = JSON.parse(payloadText) as SessionPayload;
 
     if (!payload.userId || !payload.exp || typeof payload.exp !== "number") return null;
+    if (typeof payload.sv !== "number" || !Number.isInteger(payload.sv) || payload.sv < 0) return null;
     if (Date.now() > payload.exp) return null;
 
     return payload;

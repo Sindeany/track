@@ -10,15 +10,29 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
+import {
+  clearVisitDraft,
+  enqueuePendingVisit,
+  loadVisitDraft,
+  saveVisitDraft,
+} from "@/lib/visitOfflineQueue";
 import { formatShortDate, purposeLabels } from "@/lib/visits";
 import { representativeNavigation } from "@/lib/navigation";
 import { Building2, CheckCircle2, Clock3, ImagePlus, Loader2, LocateFixed, MapPin, Sparkles, Trash2 } from "lucide-react";
-import React, { FormEvent, useCallback, useEffect, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
 type PositionState = { latitude: number; longitude: number; accuracy: number } | null;
-const initialForm = { clientName: "", employeeName: "", employeeRole: "", phone: "", address: "", visitPurpose: "quote" as keyof typeof purposeLabels, report: "" };
+const initialForm = {
+  clientName: "",
+  employeeName: "",
+  employeeRole: "",
+  phone: "",
+  address: "",
+  visitPurpose: "quote" as keyof typeof purposeLabels,
+  report: "",
+};
 
 function getDevelopmentPreviewPhotos() {
   if (!import.meta.env.DEV) return [];
@@ -43,10 +57,33 @@ function getDevicePosition() {
     if (!navigator.geolocation) return reject(new Error("هذا الجهاز لا يدعم تحديد الموقع."));
     navigator.geolocation.getCurrentPosition(
       position => resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }),
-      error => reject(error),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
+      error => {
+        if (error.code === 1) {
+          reject(new Error("تم رفض صلاحية الموقع. فعّل إذن الموقع من إعدادات المتصفح."));
+        } else {
+          reject(new Error("تعذر التقاط إحداثية GPS الحالية. حاول في مكان مفتوح."));
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 15000 },
     );
   });
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return true;
+  if (error && typeof error === "object") {
+    const maybeErr = error as { data?: { code?: string }; message?: string };
+    // Server business errors (BAD_REQUEST, UNAUTHORIZED, FORBIDDEN) should NOT be queued offline
+    if (maybeErr.data?.code) return false;
+    const msg = (maybeErr.message || "").toLowerCase();
+    return (
+      msg.includes("failed to fetch") ||
+      msg.includes("network") ||
+      msg.includes("load failed") ||
+      msg.includes("fetch")
+    );
+  }
+  return false;
 }
 
 export default function VisitForm() {
@@ -61,34 +98,170 @@ export default function VisitForm() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [autofilledClient, setAutofilledClient] = useState<string | null>(null);
 
+  const dirtyRef = useRef(false);
+  const lastPayloadRef = useRef<{
+    clientName: string;
+    employeeName: string;
+    employeeRole: string;
+    phone: string;
+    address: string;
+    visitPurpose: keyof typeof purposeLabels;
+    report: string;
+    latitude: number;
+    longitude: number;
+    locationAccuracy: number | null;
+    photos: string[];
+  } | null>(null);
+
   const { data: clientSuggestions, isLoading: searchingClients } = trpc.clients.search.useQuery(
     { query: form.clientName },
-    { enabled: form.clientName.trim().length >= 1 && showSuggestions }
+    { enabled: form.clientName.trim().length >= 1 && showSuggestions },
   );
 
   const createVisit = trpc.visits.create.useMutation({
-    onSuccess: result => { setSubmittedVisitId(result.id); },
-    onError: error => toast.error(error.message || "تعذر إرسال التقرير."),
+    onSuccess: result => {
+      void clearVisitDraft();
+      setSubmittedVisitId(result.id);
+    },
+    onError: async error => {
+      if (isNetworkFailure(error) && lastPayloadRef.current) {
+        const queued = await enqueuePendingVisit(lastPayloadRef.current);
+        if (queued) {
+          await clearVisitDraft();
+          toast.warning("انقطع الاتصال بالشبكة؛ حُفظ التقرير محلياً على جهازك للمزامنة التلقائية.");
+          setLocation("/reports");
+          return;
+        }
+      }
+      toast.error(error.message || "تعذر إرسال التقرير.");
+    },
   });
+
+  // Load saved draft on mount if user hasn't started typing yet
+  useEffect(() => {
+    let active = true;
+    void loadVisitDraft().then(draft => {
+      if (!active || !draft || dirtyRef.current) return;
+      const hasContent =
+        draft.clientName || draft.address || draft.employeeName || draft.report || draft.photos.length > 0;
+      if (!hasContent) return;
+      setForm({
+        clientName: draft.clientName,
+        employeeName: draft.employeeName,
+        employeeRole: draft.employeeRole,
+        phone: draft.phone,
+        address: draft.address,
+        visitPurpose: draft.visitPurpose,
+        report: draft.report,
+      });
+      if (draft.photos.length > 0) {
+        setPhotos(draft.photos);
+      }
+      toast.info("تم استرجاع مسودة التقرير غير المكتملة تلقائياً.");
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Auto-save draft changes with debounce
+  useEffect(() => {
+    if (submittedVisitId !== null) return;
+    const hasContent =
+      form.clientName || form.address || form.employeeName || form.report || photos.length > 0;
+    if (!hasContent) return;
+    const timer = window.setTimeout(() => {
+      void saveVisitDraft({ ...form, photos });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [form, photos, submittedVisitId]);
 
   const locate = useCallback(async (silent = false) => {
     setLocating(true);
-    try { const current = await getDevicePosition(); setPosition(current); if (!silent) toast.success("تم تحديث موقع الزيارة."); return current; }
-    catch (error) { if (!silent) toast.error(error instanceof Error ? error.message : "تعذر التقاط الموقع. تحقق من صلاحية الموقع."); return null; }
-    finally { setLocating(false); }
+    try {
+      const current = await getDevicePosition();
+      setPosition(current);
+      if (!silent) toast.success("تم تحديث موقع الزيارة.");
+      return current;
+    } catch (error) {
+      if (!silent) {
+        toast.error(error instanceof Error ? error.message : "تعذر التقاط الموقع. تحقق من صلاحية الموقع.");
+      }
+      return null;
+    } finally {
+      setLocating(false);
+    }
   }, []);
 
-  useEffect(() => { void locate(true); }, [locate]);
-  useEffect(() => { const timer = window.setInterval(() => setPreviewTime(new Date()), 30_000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    void locate(true);
+  }, [locate]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setPreviewTime(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  function updateForm<K extends keyof typeof initialForm>(key: K, value: (typeof initialForm)[K]) {
+    dirtyRef.current = true;
+    setForm(prev => ({ ...prev, [key]: value }));
+  }
+
+  function validateFormFields(): string | null {
+    if (form.clientName.trim().length < 2) return "اسم العميل يجب ألا يقل عن حرفين.";
+    if (form.address.trim().length < 5) return "يرجى كتابة عنوان الزيارة بشكل واضح (5 أحرف فأكثر).";
+    if (form.employeeName.trim().length < 2) return "اسم الموظف يجب ألا يقل عن حرفين.";
+    if (form.employeeRole.trim().length < 2) return "دور الموظف يجب ألا يقل عن حرفين.";
+    if (form.phone.trim().length < 6) return "يرجى إدخال رقم هاتف صالح (6 خانات فأكثر).";
+    if (form.report.trim().length < 10) return "يرجى كتابة ملخص واضح للتقرير (10 أحرف فأكثر).";
+    return null;
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const currentPosition = await locate(true);
-    if (!currentPosition) { toast.error("يجب السماح بالوصول للموقع عند إرسال التقرير."); return; }
-    createVisit.mutate({ ...form, latitude: currentPosition.latitude, longitude: currentPosition.longitude, locationAccuracy: currentPosition.accuracy, photos });
+    const validationError = validateFormFields();
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
+    const refreshedPosition = await locate(true);
+    const effectivePosition = refreshedPosition ?? position;
+    if (!effectivePosition) {
+      toast.error("يجب السماح بالوصول للموقع عند إرسال التقرير.");
+      return;
+    }
+
+    const payload = {
+      ...form,
+      latitude: effectivePosition.latitude,
+      longitude: effectivePosition.longitude,
+      locationAccuracy: effectivePosition.accuracy,
+      photos,
+    };
+    lastPayloadRef.current = payload;
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const queued = await enqueuePendingVisit(payload);
+      if (queued) {
+        await clearVisitDraft();
+        toast.warning("أنت غير متصل بالإنترنت؛ حُفظ التقرير محلياً وسيتم إرساله فور عودة الاتصال.");
+        setLocation("/reports");
+        return;
+      }
+    }
+
+    createVisit.mutate(payload);
   }
 
-  function handleSelectClient(client: { name: string; address: string; contactPerson: string | null; contactRole: string | null; phone: string }) {
+  function handleSelectClient(client: {
+    name: string;
+    address: string;
+    contactPerson: string | null;
+    contactRole: string | null;
+    phone: string;
+  }) {
+    dirtyRef.current = true;
     setForm(prev => ({
       ...prev,
       clientName: client.name,
@@ -106,98 +279,337 @@ export default function VisitForm() {
     if (submittedVisitId) setLocation(`/reports/${submittedVisitId}`);
   };
 
-  return <DashboardLayout title="تقرير زيارة جديد" subtitle="أدخل تفاصيل الزيارة ثم أرسلها من موقعك" navigation={representativeNavigation}>
-    <SubmissionSuccessDialog open={submittedVisitId !== null} reportId={submittedVisitId} onViewReport={viewSubmittedReport} />
-    <form onSubmit={submit} className="mx-auto max-w-4xl space-y-5">
-      <Card className="overflow-hidden border-0 bg-[#104946] text-white shadow-[0_18px_45px_-28px_rgba(16,73,70,.6)]"><CardContent className="flex flex-col gap-4 p-5 md:p-6"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><div className="flex items-center gap-2"><MapPin className="h-5 w-5 text-[#D8FFB6]" /><h2 className="font-bold">بيانات ميدانية موثّقة</h2></div><p className="mt-2 text-sm leading-6 text-white/65">البيانات أدناه للعرض فقط؛ وتُثبّت قيمها النهائية من النظام لحظة الإرسال.</p></div><div className="flex items-center gap-2"><Badge className={position ? "border-0 bg-[#D8FFB6] text-[#0B4C46]" : "border-0 bg-white/15 text-white"}>{position ? <CheckCircle2 className="ml-1 h-3.5 w-3.5" /> : <LocateFixed className="ml-1 h-3.5 w-3.5" />}{position ? `دقة تقريبية ${Math.round(position.accuracy)} م` : "جارٍ التحقق من الموقع"}</Badge><Button type="button" variant="ghost" onClick={() => void locate()} disabled={locating} className="border border-white/15 text-white hover:bg-white/10 hover:text-white">{locating ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <LocateFixed className="ml-2 h-4 w-4" />}تحديث</Button></div></div><div className="grid gap-3 md:grid-cols-3"><div className="space-y-1"><Label className="text-xs text-white/65">التاريخ النظامي</Label><Input readOnly value={formatShortDate(previewTime)} className="h-10 border-white/10 bg-white/10 text-white placeholder:text-white/50 focus-visible:ring-[#D8FFB6]" /></div><div className="space-y-1"><Label className="text-xs text-white/65">الوقت النظامي</Label><Input readOnly value={previewTime.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })} className="h-10 border-white/10 bg-white/10 text-white placeholder:text-white/50 focus-visible:ring-[#D8FFB6]" /></div><div className="space-y-1"><Label className="text-xs text-white/65">الموقع الحالي</Label><Input readOnly value={position ? `${position.latitude.toFixed(5)}, ${position.longitude.toFixed(5)}` : "بانتظار سماح الموقع"} className="h-10 border-white/10 bg-white/10 text-white placeholder:text-white/50 focus-visible:ring-[#D8FFB6]" /></div></div></CardContent></Card>
-      <section className="grid gap-5 lg:grid-cols-2"><Card className="border-[#DCE8E5] shadow-sm"><CardContent className="space-y-5 p-5 md:p-6"><div><p className="text-xs font-bold tracking-[.13em] text-[#35766E]">١ — جهة الزيارة</p><h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">بيانات العميل</h2></div>
-      <div className="space-y-2 relative">
-        <div className="flex items-center justify-between">
-          <Label htmlFor="clientName">اسم العميل</Label>
-          {autofilledClient && form.clientName === autofilledClient && (
-            <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px] gap-1 font-normal">
-              <Sparkles className="h-3 w-3 text-emerald-600" />
-              تم التعبئة من السجل
-            </Badge>
-          )}
-        </div>
-        <div className="relative">
-          <Input
-            id="clientName"
-            value={form.clientName}
-            onChange={e => {
-              setForm({ ...form, clientName: e.target.value });
-              setShowSuggestions(true);
-              if (autofilledClient && e.target.value !== autofilledClient) {
-                setAutofilledClient(null);
-              }
-            }}
-            onFocus={() => {
-              if (form.clientName.trim().length >= 1) {
-                setShowSuggestions(true);
-              }
-            }}
-            onBlur={() => {
-              setTimeout(() => setShowSuggestions(false), 250);
-            }}
-            placeholder="اسم الشركة أو العميل (ابحث لاقتراح عميل سابق)"
-            autoComplete="off"
-            required
-          />
-          {searchingClients && (
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin" />
-            </span>
-          )}
-        </div>
-
-        {/* Floating Autocomplete Dropdown */}
-        {showSuggestions && clientSuggestions && clientSuggestions.length > 0 && (
-          <div className="absolute z-50 right-0 left-0 mt-1 max-h-60 overflow-y-auto rounded-xl border border-[#DCE8E5] bg-white p-1.5 shadow-xl">
-            <div className="px-2 py-1 text-[10px] font-bold tracking-wider text-[#35766E] uppercase">
-              عملاء سابقون مطابقون (اضغط للتعبئة التلقائية)
-            </div>
-            {clientSuggestions.map(client => (
-              <button
-                key={client.id}
-                type="button"
-                onMouseDown={e => {
-                  e.preventDefault();
-                  handleSelectClient(client);
-                }}
-                className="flex w-full flex-col items-start gap-1 rounded-lg p-2.5 text-right transition-colors hover:bg-[#E5F3EF] cursor-pointer text-slate-800"
-              >
-                <div className="flex w-full items-center justify-between">
-                  <span className="font-bold text-[#153D3A] flex items-center gap-1.5">
-                    <Building2 className="h-3.5 w-3.5 text-[#24746B]" />
-                    {client.name}
-                  </span>
-                  <span className="text-xs font-mono text-slate-500" dir="ltr">
-                    {client.phone}
-                  </span>
+  return (
+    <DashboardLayout title="تقرير زيارة جديد" subtitle="أدخل تفاصيل الزيارة ثم أرسلها من موقعك" navigation={representativeNavigation}>
+      <SubmissionSuccessDialog open={submittedVisitId !== null} reportId={submittedVisitId} onViewReport={viewSubmittedReport} />
+      <form onSubmit={submit} className="mx-auto max-w-4xl space-y-5">
+        <Card className="overflow-hidden border-0 bg-[#104946] text-white shadow-[0_18px_45px_-28px_rgba(16,73,70,.6)]">
+          <CardContent className="flex flex-col gap-4 p-5 md:p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-[#D8FFB6]" />
+                  <h2 className="font-bold">بيانات ميدانية موثّقة</h2>
                 </div>
-                <div className="flex w-full items-center justify-between text-xs text-slate-500">
-                  <span className="truncate max-w-[200px]" title={client.address}>
-                    📍 {client.address}
-                  </span>
-                  {client.contactPerson && (
-                    <span className="text-slate-600">
-                      👤 {client.contactPerson} {client.contactRole ? `(${client.contactRole})` : ""}
+                <p className="mt-2 text-sm leading-6 text-white/65">
+                  البيانات أدناه للعرض فقط؛ وتُثبّت قيمها النهائية من النظام لحظة الإرسال.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className={position ? "border-0 bg-[#D8FFB6] text-[#0B4C46]" : "border-0 bg-white/15 text-white"}>
+                  {position ? <CheckCircle2 className="ml-1 h-3.5 w-3.5" /> : <LocateFixed className="ml-1 h-3.5 w-3.5" />}
+                  {position ? `دقة تقريبية ${Math.round(position.accuracy)} م` : "جارٍ التحقق من الموقع"}
+                </Badge>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => void locate()}
+                  disabled={locating}
+                  className="border border-white/15 text-white hover:bg-white/10 hover:text-white"
+                >
+                  {locating ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <LocateFixed className="ml-2 h-4 w-4" />}
+                  تحديث
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-white/65">التاريخ النظامي</Label>
+                <Input
+                  readOnly
+                  value={formatShortDate(previewTime)}
+                  className="h-10 border-white/10 bg-white/10 text-white placeholder:text-white/50 focus-visible:ring-[#D8FFB6]"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-white/65">الوقت النظامي</Label>
+                <Input
+                  readOnly
+                  value={previewTime.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}
+                  className="h-10 border-white/10 bg-white/10 text-white placeholder:text-white/50 focus-visible:ring-[#D8FFB6]"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-white/65">الموقع الحالي</Label>
+                <Input
+                  readOnly
+                  value={position ? `${position.latitude.toFixed(5)}, ${position.longitude.toFixed(5)}` : "بانتظار سماح الموقع"}
+                  className="h-10 border-white/10 bg-white/10 text-white placeholder:text-white/50 focus-visible:ring-[#D8FFB6]"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <section className="grid gap-5 lg:grid-cols-2">
+          <Card className="border-[#DCE8E5] shadow-sm">
+            <CardContent className="space-y-5 p-5 md:p-6">
+              <div>
+                <p className="text-xs font-bold tracking-[.13em] text-[#35766E]">١ — جهة الزيارة</p>
+                <h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">بيانات العميل</h2>
+              </div>
+              <div className="relative space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="clientName">اسم العميل</Label>
+                  {autofilledClient && form.clientName === autofilledClient && (
+                    <Badge className="gap-1 border-emerald-200 bg-emerald-50 text-[11px] font-normal text-emerald-700">
+                      <Sparkles className="h-3 w-3 text-emerald-600" />
+                      تم التعبئة من السجل
+                    </Badge>
+                  )}
+                </div>
+                <div className="relative">
+                  <Input
+                    id="clientName"
+                    value={form.clientName}
+                    onChange={e => {
+                      updateForm("clientName", e.target.value);
+                      setShowSuggestions(true);
+                      if (autofilledClient && e.target.value !== autofilledClient) {
+                        setAutofilledClient(null);
+                      }
+                    }}
+                    onFocus={() => {
+                      if (form.clientName.trim().length >= 1) {
+                        setShowSuggestions(true);
+                      }
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => setShowSuggestions(false), 250);
+                    }}
+                    placeholder="اسم الشركة أو العميل (ابحث لاقتراح عميل سابق)"
+                    autoComplete="off"
+                    required
+                  />
+                  {searchingClients && (
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     </span>
                   )}
                 </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
 
-      <div className="space-y-2"><Label htmlFor="address">العنوان</Label><Textarea id="address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="المدينة، الحي، اسم الشارع أو وصف الموقع" className="min-h-25 resize-none" required /></div><div className="space-y-2"><Label htmlFor="purpose">الغرض من الزيارة</Label><Select value={form.visitPurpose} onValueChange={value => setForm({ ...form, visitPurpose: value as keyof typeof purposeLabels })}><SelectTrigger id="purpose"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(purposeLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div></CardContent></Card>
-        <Card className="border-[#DCE8E5] shadow-sm"><CardContent className="space-y-5 p-5 md:p-6"><div><p className="text-xs font-bold tracking-[.13em] text-[#35766E]">٢ — التواصل</p><h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">بيانات الموظف</h2></div><div className="space-y-2"><Label htmlFor="employeeName">اسم الموظف</Label><Input id="employeeName" value={form.employeeName} onChange={e => setForm({ ...form, employeeName: e.target.value })} placeholder="اسم جهة الاتصال" required /></div><div className="space-y-2"><Label htmlFor="employeeRole">دور الموظف</Label><Input id="employeeRole" value={form.employeeRole} onChange={e => setForm({ ...form, employeeRole: e.target.value })} placeholder="مثال: مدير المشتريات" required /></div><div className="space-y-2"><Label htmlFor="phone">رقم الهاتف</Label><Input id="phone" dir="ltr" inputMode="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+966 5X XXX XXXX" required /></div></CardContent></Card></section>
-      <Card className="border-[#DCE8E5] shadow-sm"><CardContent className="space-y-4 p-5 md:p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold tracking-[.13em] text-[#35766E]">٣ — ملخص الزيارة</p><h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">تقرير الزيارة</h2></div><Clock3 className="h-5 w-5 text-[#78A7A0]" /></div><Textarea value={form.report} onChange={e => setForm({ ...form, report: e.target.value })} placeholder="اذكر ما تم خلال الزيارة، ملاحظات العميل، الخطوات التالية وأي تفاصيل مهمة..." className="min-h-45 resize-y leading-7" required /></CardContent></Card>
-        <Card className="border-[#DCE8E5] shadow-sm"><CardContent className="p-5 md:p-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold tracking-[.13em] text-[#35766E]">٤ — توثيق بصري</p><h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">صور الزيارة</h2><p className="mt-1 text-sm text-slate-500">عند الانتهاء من التقرير، التقط الصور ثم أكّد إرفاقها. حتى ٥ صور.</p></div><span className="inline-flex h-9 items-center self-start rounded-full bg-[#EDF7F5] px-3 text-xs font-bold text-[#17675F]">{photos.length}/٥ صور مرفقة</span></div>{photos.length ? <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">{photos.map((photo, index) => <div key={photo} className="group relative overflow-hidden rounded-xl border border-[#DCE8E5] bg-[#F4F7F7]"><button type="button" onClick={() => setPreviewIndex(index)} className="block aspect-square w-full cursor-pointer focus:outline-none" aria-label={`استعراض الصورة ${index + 1}`}><img src={photo} alt={`صورة الزيارة ${index + 1}`} className="h-full w-full object-cover transition hover:scale-105" /></button><button type="button" onClick={() => setPhotos(current => current.filter((_, photoIndex) => photoIndex !== index))} className="absolute left-1.5 top-1.5 grid h-7 w-7 place-items-center rounded-lg bg-slate-950/70 text-white opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100" aria-label={`حذف الصورة ${index + 1}`}><Trash2 className="h-3.5 w-3.5" /></button><span className="pointer-events-none absolute bottom-1.5 right-1.5 rounded-md bg-slate-950/65 px-1.5 py-0.5 text-[10px] font-bold text-white">{index + 1}</span></div>)}</div> : <div className="mt-5 grid place-items-center rounded-2xl border border-dashed border-[#C6DCD8] bg-[#FAFCFC] py-8 text-center"><ImagePlus className="h-6 w-6 text-[#78A7A0]" /><p className="mt-2 text-sm text-slate-500">لا توجد صور مرفقة حتى الآن</p></div>}</CardContent></Card>
-      <section className="rounded-2xl border border-[#DCE8E5] bg-[#F8FBFA] p-4" aria-label="إجراءات إنهاء التقرير"><div className="flex flex-col gap-1"><h2 className="font-extrabold text-[#153D3A]">إنهاء التقرير</h2><p className="text-sm text-slate-500">راجع البيانات والصور ثم أرسل التقرير.</p></div><div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end"><CameraCapture disabled={photos.length >= 5} photos={photos} onCapture={photo => setPhotos(current => [...current, photo])} onRemove={index => setPhotos(current => current.filter((_, photoIndex) => photoIndex !== index))} triggerClassName="w-full sm:w-auto" /><Button type="submit" disabled={createVisit.isPending || locating} className="h-12 w-full bg-[#0D625B] px-7 text-base hover:bg-[#094D48] sm:w-auto">{createVisit.isPending ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="ml-2 h-4 w-4" />}{createVisit.isPending ? "جارٍ إرسال التقرير" : "إرسال التقرير"}</Button></div></section>
-    </form>
-    <PhotoLightbox photos={photos.map((p, i) => ({ url: p, title: `معاينة الصورة (${i + 1} من ${photos.length})` }))} initialIndex={previewIndex ?? 0} isOpen={previewIndex !== null} onClose={() => setPreviewIndex(null)} />
-  </DashboardLayout>;
+                {showSuggestions && clientSuggestions && clientSuggestions.length > 0 && (
+                  <div className="absolute right-0 left-0 z-50 mt-1 max-h-60 overflow-y-auto rounded-xl border border-[#DCE8E5] bg-white p-1.5 shadow-xl">
+                    <div className="px-2 py-1 text-[10px] font-bold tracking-wider text-[#35766E] uppercase">
+                      عملاء سابقون مطابقون (اضغط للتعبئة التلقائية)
+                    </div>
+                    {clientSuggestions.map(client => (
+                      <button
+                        key={client.id}
+                        type="button"
+                        onMouseDown={e => {
+                          e.preventDefault();
+                          handleSelectClient(client);
+                        }}
+                        className="flex w-full cursor-pointer flex-col items-start gap-1 rounded-lg p-2.5 text-right text-slate-800 transition-colors hover:bg-[#E5F3EF]"
+                      >
+                        <div className="flex w-full items-center justify-between">
+                          <span className="flex items-center gap-1.5 font-bold text-[#153D3A]">
+                            <Building2 className="h-3.5 w-3.5 text-[#24746B]" />
+                            {client.name}
+                          </span>
+                          <span className="font-mono text-xs text-slate-500" dir="ltr">
+                            {client.phone}
+                          </span>
+                        </div>
+                        <div className="flex w-full items-center justify-between text-xs text-slate-500">
+                          <span className="max-w-[200px] truncate" title={client.address}>
+                            📍 {client.address}
+                          </span>
+                          {client.contactPerson && (
+                            <span className="text-slate-600">
+                              👤 {client.contactPerson} {client.contactRole ? `(${client.contactRole})` : ""}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="address">العنوان</Label>
+                <Textarea
+                  id="address"
+                  value={form.address}
+                  onChange={e => updateForm("address", e.target.value)}
+                  placeholder="المدينة، الحي، اسم الشارع أو وصف الموقع"
+                  className="min-h-25 resize-none"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="purpose">الغرض من الزيارة</Label>
+                <Select
+                  value={form.visitPurpose}
+                  onValueChange={value => updateForm("visitPurpose", value as keyof typeof purposeLabels)}
+                >
+                  <SelectTrigger id="purpose">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(purposeLabels).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-[#DCE8E5] shadow-sm">
+            <CardContent className="space-y-5 p-5 md:p-6">
+              <div>
+                <p className="text-xs font-bold tracking-[.13em] text-[#35766E]">٢ — التواصل</p>
+                <h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">بيانات الموظف</h2>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="employeeName">اسم الموظف</Label>
+                <Input
+                  id="employeeName"
+                  value={form.employeeName}
+                  onChange={e => updateForm("employeeName", e.target.value)}
+                  placeholder="اسم جهة الاتصال"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="employeeRole">دور الموظف</Label>
+                <Input
+                  id="employeeRole"
+                  value={form.employeeRole}
+                  onChange={e => updateForm("employeeRole", e.target.value)}
+                  placeholder="مثال: مدير المشتريات"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">رقم الهاتف</Label>
+                <Input
+                  id="phone"
+                  dir="ltr"
+                  inputMode="tel"
+                  value={form.phone}
+                  onChange={e => updateForm("phone", e.target.value)}
+                  placeholder="+966 5X XXX XXXX"
+                  required
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        <Card className="border-[#DCE8E5] shadow-sm">
+          <CardContent className="space-y-4 p-5 md:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold tracking-[.13em] text-[#35766E]">٣ — ملخص الزيارة</p>
+                <h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">تقرير الزيارة</h2>
+              </div>
+              <Clock3 className="h-5 w-5 text-[#78A7A0]" />
+            </div>
+            <Textarea
+              value={form.report}
+              onChange={e => updateForm("report", e.target.value)}
+              placeholder="اذكر ما تم خلال الزيارة، ملاحظات العميل، الخطوات التالية وأي تفاصيل مهمة..."
+              className="min-h-45 resize-y leading-7"
+              required
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="border-[#DCE8E5] shadow-sm">
+          <CardContent className="p-5 md:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold tracking-[.13em] text-[#35766E]">٤ — توثيق بصري</p>
+                <h2 className="mt-1 text-lg font-extrabold text-[#153D3A]">صور الزيارة</h2>
+                <p className="mt-1 text-sm text-slate-500">عند الانتهاء من التقرير، التقط الصور ثم أكّد إرفاقها. حتى ٥ صور.</p>
+              </div>
+              <span className="inline-flex h-9 items-center self-start rounded-full bg-[#EDF7F5] px-3 text-xs font-bold text-[#17675F]">
+                {photos.length}/٥ صور مرفقة
+              </span>
+            </div>
+            {photos.length ? (
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {photos.map((photo, index) => (
+                  <div
+                    key={`${index}-${photo.slice(-24)}`}
+                    className="group relative overflow-hidden rounded-xl border border-[#DCE8E5] bg-[#F4F7F7]"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setPreviewIndex(index)}
+                      className="block aspect-square w-full cursor-pointer focus:outline-none"
+                      aria-label={`استعراض الصورة ${index + 1}`}
+                    >
+                      <img src={photo} alt={`صورة الزيارة ${index + 1}`} className="h-full w-full object-cover transition hover:scale-105" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        dirtyRef.current = true;
+                        setPhotos(current => current.filter((_, photoIndex) => photoIndex !== index));
+                      }}
+                      className="absolute left-1.5 top-1.5 grid h-7 w-7 place-items-center rounded-lg bg-slate-950/70 text-white opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100"
+                      aria-label={`حذف الصورة ${index + 1}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="pointer-events-none absolute bottom-1.5 right-1.5 rounded-md bg-slate-950/65 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      {index + 1}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-5 grid place-items-center rounded-2xl border border-dashed border-[#C6DCD8] bg-[#FAFCFC] py-8 text-center">
+                <ImagePlus className="h-6 w-6 text-[#78A7A0]" />
+                <p className="mt-2 text-sm text-slate-500">لا توجد صور مرفقة حتى الآن</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <section className="rounded-2xl border border-[#DCE8E5] bg-[#F8FBFA] p-4" aria-label="إجراءات إنهاء التقرير">
+          <div className="flex flex-col gap-1">
+            <h2 className="font-extrabold text-[#153D3A]">إنهاء التقرير</h2>
+            <p className="text-sm text-slate-500">راجع البيانات والصور ثم أرسل التقرير.</p>
+          </div>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <CameraCapture
+              disabled={photos.length >= 5}
+              photos={photos}
+              onCapture={photo => {
+                dirtyRef.current = true;
+                setPhotos(current => [...current, photo]);
+              }}
+              onRemove={index => {
+                dirtyRef.current = true;
+                setPhotos(current => current.filter((_, photoIndex) => photoIndex !== index));
+              }}
+              triggerClassName="w-full sm:w-auto"
+            />
+            <Button
+              type="submit"
+              disabled={createVisit.isPending || locating}
+              className="h-12 w-full bg-[#0D625B] px-7 text-base hover:bg-[#094D48] sm:w-auto"
+            >
+              {createVisit.isPending ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="ml-2 h-4 w-4" />}
+              {createVisit.isPending ? "جارٍ إرسال التقرير" : "إرسال التقرير"}
+            </Button>
+          </div>
+        </section>
+      </form>
+      <PhotoLightbox
+        photos={photos.map((p, i) => ({ url: p, title: `معاينة الصورة (${i + 1} من ${photos.length})` }))}
+        initialIndex={previewIndex ?? 0}
+        isOpen={previewIndex !== null}
+        onClose={() => setPreviewIndex(null)}
+      />
+    </DashboardLayout>
+  );
 }

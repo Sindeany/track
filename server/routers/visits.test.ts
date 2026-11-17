@@ -46,10 +46,32 @@ describe("visit report validation", () => {
     expect(() => visitCreateSchema.parse({ ...validDraft, visitedAt: new Date().toISOString() })).toThrow();
   });
 
-  it("accepts only JPEG data URLs from the camera upload flow", () => {
-    const bytes = cameraJpegToBuffer("data:image/jpeg;base64,aGVsbG8=");
-    expect(bytes.toString()).toBe("hello");
-    expect(() => cameraJpegToBuffer("data:image/png;base64,aGVsbG8=")).toThrow();
+  it("accepts only real JPEG binary payloads from the camera upload flow", () => {
+    const validJpegBase64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString("base64");
+    const bytes = cameraJpegToBuffer(`data:image/jpeg;base64,${validJpegBase64}`);
+    expect(bytes[0]).toBe(0xff);
+    expect(bytes[1]).toBe(0xd8);
+    expect(bytes[2]).toBe(0xff);
+    // Reject PNG data URL
+    expect(() => cameraJpegToBuffer(`data:image/png;base64,${validJpegBase64}`)).toThrow();
+    // Reject non-JPEG bytes disguised with a JPEG data URL prefix ("hello")
+    expect(() => cameraJpegToBuffer("data:image/jpeg;base64,aGVsbG8=")).toThrow();
+  });
+
+  it("validates photos before creating any visit record in the database", async () => {
+    const db = await import("../db");
+    const { vi } = await import("vitest");
+    const getDbSpy = vi.spyOn(db, "getDb");
+
+    const caller = appRouter.createCaller(createTestContext("user"));
+    await expect(
+      caller.visits.create({
+        ...validDraft,
+        photos: ["data:image/jpeg;base64,aGVsbG8="],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    expect(getDbSpy).not.toHaveBeenCalled();
   });
 });
 

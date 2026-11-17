@@ -11,6 +11,11 @@ function isIpAddress(host: string) {
 function isSecureRequest(req: Request) {
   if (req.protocol === "https") return true;
 
+  const cloudflareVisitor = req.headers["cf-visitor"];
+  if (typeof cloudflareVisitor === "string" && cloudflareVisitor.toLowerCase().includes('"https"')) {
+    return true;
+  }
+
   const forwardedProto = req.headers["x-forwarded-proto"];
   if (!forwardedProto) return false;
 
@@ -42,7 +47,7 @@ export function getSessionCookieOptions(
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    sameSite: "lax",
     secure: isSecureRequest(req),
   };
 }

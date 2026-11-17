@@ -29,15 +29,6 @@ export async function storagePut(
   return { key, url: `/uploads/${key}` };
 }
 
-export async function storageGet(relKey: string) {
-  const key = safeKey(relKey);
-  return { key, url: `/uploads/${key}` };
-}
-
-export async function storageGetSignedUrl(relKey: string) {
-  return (await storageGet(relKey)).url;
-}
-
 export async function storageDelete(relKey: string): Promise<void> {
   try {
     const key = safeKey(relKey);

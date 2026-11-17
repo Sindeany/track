@@ -1,16 +1,27 @@
+# Local database only. Start with: docker compose --profile dev up -d db
+# Production is a separate file so missing production secrets do not block local development:
+# docker compose -f docker-compose.prod.yml up -d --build
+
 services:
   db:
     image: mysql:8.4
+    profiles: ["dev"]
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: field_visits
-      MYSQL_USER: fieldvisits
-      MYSQL_PASSWORD: fieldvisits_dev_password
-      MYSQL_ROOT_PASSWORD: root_dev_password
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-field_visits}
+      MYSQL_USER: ${MYSQL_USER:-fieldvisits}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-fieldvisits_dev_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_dev_password}
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
-      - field_visits_mysql:/var/lib/mysql
+      - field_visits_mysql_dev:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
-  field_visits_mysql:
+  field_visits_mysql_dev:

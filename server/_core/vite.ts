@@ -58,7 +58,13 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith(`${path.sep}sw.js`) || filePath.endsWith(`${path.sep}index.html`)) {
+        res.setHeader("Cache-Control", "no-cache");
+      }
+    },
+  }));
 
   // fall through to index.html for page navigations, but 404 for missing assets
   app.use("*", (req, res) => {
@@ -70,6 +76,7 @@ export function serveStatic(app: Express) {
     ) {
       return res.status(404).type("text/plain").send("Not Found");
     }
+    res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }

@@ -1,18 +1,35 @@
-import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { COOKIE_NAME, SESSION_TTL_MS } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createSessionToken, hashPassword, verifyPassword } from "./_core/auth";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, publicProcedure, router } from "./_core/trpc";
-import { createUserWithPassword, deleteStaffUser, getUserById, getUserByLogin, getUserByOpenId, listRepresentatives, listStaffWithKPIs, resetStaffPassword, updateStaffUser, updateUserLastSignedIn } from "./db";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import {
+  countAdmins,
+  countVisitsForRepresentative,
+  createUserWithPassword,
+  deleteStaffUser,
+  getUserAuthById,
+  getUserByEmail,
+  getUserById,
+  getUserByLogin,
+  getUserByOpenId,
+  listRepresentatives,
+  listStaffWithKPIs,
+  resetStaffPassword,
+  sanitizeUser,
+  updateStaffUser,
+  updateUserLastSignedIn,
+} from "./db";
 import { clientsRouter } from "./routers/clients";
 import { visitsRouter } from "./routers/visits";
+import { lastAdminMutationBlocked, staffDeleteBlocked } from "./staffPolicy";
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(opts => (opts.ctx.user ? sanitizeUser(opts.ctx.user) : null)),
     login: publicProcedure
       .input(
         z.object({
@@ -37,12 +54,16 @@ export const appRouter = router({
         }
 
         await updateUserLastSignedIn(user.id);
-        const token = createSessionToken({ userId: user.id, role: user.role });
+        const token = createSessionToken({
+          userId: user.id,
+          role: user.role,
+          sessionVersion: user.sessionVersion ?? 0,
+        });
         const cookieOptions = getSessionCookieOptions(ctx.req);
 
         ctx.res.cookie(COOKIE_NAME, token, {
           ...cookieOptions,
-          maxAge: ONE_YEAR_MS,
+          maxAge: SESSION_TTL_MS,
         });
 
         return {
@@ -61,13 +82,44 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+    changePassword: protectedProcedure
+      .input(
+        z.object({
+          currentPassword: z.string().min(1, "أدخل كلمة المرور الحالية."),
+          newPassword: z.string().min(8, "كلمة المرور الجديدة يجب ألا تقل عن 8 خانات."),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        if (input.currentPassword === input.newPassword) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "يجب أن تختلف كلمة المرور الجديدة عن الحالية.",
+          });
+        }
+        const userWithAuth = await getUserAuthById(ctx.user.id);
+        if (!userWithAuth || !userWithAuth.passwordHash) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "هذا الحساب لا يستخدم كلمة مرور محلية.",
+          });
+        }
+        if (!verifyPassword(input.currentPassword, userWithAuth.passwordHash)) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "كلمة المرور الحالية غير صحيحة.",
+          });
+        }
+        const nextHash = hashPassword(input.newPassword);
+        await resetStaffPassword(ctx.user.id, nextHash);
+        return { success: true as const, message: "تم تحديث كلمة المرور بنجاح." };
+      }),
     createUser: adminProcedure
       .input(
         z.object({
           openId: z.string().trim().min(3, "اسم المستخدم يجب ألا يقل عن 3 أحرف.").max(64),
           name: z.string().trim().min(2, "اسم الموظف مطلوب.").max(180),
           email: z.string().trim().email("صيغة البريد الإلكتروني غير صحيحة.").nullable().optional(),
-          password: z.string().min(6, "كلمة المرور يجب ألا تقل عن 6 خانات."),
+          password: z.string().min(8, "كلمة المرور يجب ألا تقل عن 8 خانات."),
           role: z.enum(["user", "admin"]).default("user"),
         }),
       )
@@ -78,6 +130,16 @@ export const appRouter = router({
             code: "CONFLICT",
             message: "اسم المستخدم مسجل مسبقًا.",
           });
+        }
+
+        if (input.email) {
+          const existingEmail = await getUserByEmail(input.email);
+          if (existingEmail) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "البريد الإلكتروني مسجل لحساب آخر مسبقًا.",
+            });
+          }
         }
 
         const passwordHash = hashPassword(input.password);
@@ -120,6 +182,32 @@ export const appRouter = router({
             message: "لا يمكنك تجميد حسابك الحالي لتجنب إقفال لوحة التحكم.",
           });
         }
+        const changesPrivilege =
+          input.isActive === false || (input.role !== undefined && input.role !== "admin");
+        if (changesPrivilege) {
+          const target = await getUserById(input.id);
+          if (!target) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "المستخدم غير موجود." });
+          }
+          if (target.role === "admin") {
+            const message = lastAdminMutationBlocked({
+              targetRole: "admin",
+              adminCount: await countAdmins(),
+              nextRole: input.role,
+              nextIsActive: input.isActive,
+            });
+            if (message) throw new TRPCError({ code: "BAD_REQUEST", message });
+          }
+        }
+        if (input.email) {
+          const existingEmail = await getUserByEmail(input.email);
+          if (existingEmail && existingEmail.id !== input.id) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "البريد الإلكتروني مسجل لحساب آخر مسبقًا.",
+            });
+          }
+        }
         const updated = await updateStaffUser(input.id, {
           name: input.name,
           email: input.email,
@@ -142,7 +230,7 @@ export const appRouter = router({
       .input(
         z.object({
           userId: z.number().int().positive(),
-          newPassword: z.string().min(6, "كلمة المرور يجب ألا تقل عن 6 خانات."),
+          newPassword: z.string().min(8, "كلمة المرور يجب ألا تقل عن 8 خانات."),
         }),
       )
       .mutation(async ({ input }) => {
@@ -167,6 +255,16 @@ export const appRouter = router({
         if (!targetUser) {
           throw new TRPCError({ code: "NOT_FOUND", message: "الموظف غير موجود." });
         }
+        if (targetUser.role === "admin") {
+          const message = lastAdminMutationBlocked({
+            targetRole: "admin",
+            adminCount: await countAdmins(),
+            deleting: true,
+          });
+          if (message) throw new TRPCError({ code: "BAD_REQUEST", message });
+        }
+        const visitMessage = staffDeleteBlocked(await countVisitsForRepresentative(input.id));
+        if (visitMessage) throw new TRPCError({ code: "BAD_REQUEST", message: visitMessage });
         await deleteStaffUser(input.id, ctx.user.id);
         return { success: true as const, id: input.id };
       }),

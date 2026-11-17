@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { COOKIE_NAME } from "../shared/const";
 import { createSessionToken, hashPassword, verifyPassword, verifySessionToken } from "./_core/auth";
-import type { TrpcContext } from "./_core/context";
+import { authenticateRequest, type TrpcContext } from "./_core/context";
 import * as db from "./db";
 import { appRouter } from "./routers";
 
@@ -53,6 +53,7 @@ describe("auth cryptography and token utilities", () => {
     expect(verified).not.toBeNull();
     expect(verified?.userId).toBe(42);
     expect(verified?.role).toBe("admin");
+    expect(verified?.sv).toBe(0);
   });
 
   it("rejects tampered session tokens", () => {
@@ -64,6 +65,30 @@ describe("auth cryptography and token utilities", () => {
   it("rejects expired session tokens", () => {
     const expiredToken = createSessionToken({ userId: 42, role: "user" }, undefined, -1000);
     expect(verifySessionToken(expiredToken)).toBeNull();
+  });
+
+  it("rejects a session after the password changes the session version", async () => {
+    const token = createSessionToken({ userId: 5, role: "user", sessionVersion: 1 });
+    vi.spyOn(db, "getUserById").mockResolvedValueOnce({
+      id: 5,
+      openId: "rep",
+      name: "Rep",
+      email: "rep@example.com",
+      role: "user",
+      loginMethod: "password",
+      isActive: true,
+      sessionVersion: 2,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    });
+
+    const user = await authenticateRequest({
+      headers: { cookie: `${COOKIE_NAME}=${token}` },
+    } as Parameters<typeof authenticateRequest>[0]);
+
+    expect(verifySessionToken(token)?.sv).toBe(1);
+    expect(user).toBeNull();
   });
 });
 
@@ -177,5 +202,141 @@ describe("auth.createUser management procedure", () => {
     expect(created.openId).toBe("new_rep");
     expect(created.name).toBe("مندوب جديد");
     expect(created.role).toBe("user");
+  });
+
+  it("rejects duplicate email when creating a user", async () => {
+    const adminUser: any = { id: 99, openId: "admin", role: "admin" };
+    vi.spyOn(db, "getUserByOpenId").mockResolvedValueOnce(undefined);
+    vi.spyOn(db, "getUserByEmail").mockResolvedValueOnce({ id: 5, openId: "other" } as any);
+
+    const { ctx } = createMockContext(adminUser);
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(
+      caller.auth.createUser({
+        openId: "new_rep_2",
+        name: "مندوب آخر",
+        email: "taken@sindean.com",
+        password: "password123",
+        role: "user",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+});
+
+describe("security hardening and self-service password", () => {
+  it("strips passwordHash from auth.me response", async () => {
+    const userWithLeak: any = {
+      id: 7,
+      openId: "rep_safe",
+      name: "سالم",
+      email: "salem@sindean.com",
+      role: "user",
+      isActive: true,
+      passwordHash: "secret_salt:secret_hash",
+    };
+    const { ctx } = createMockContext(userWithLeak);
+    const caller = appRouter.createCaller(ctx);
+    const me = await caller.auth.me();
+
+    expect(me).not.toBeNull();
+    expect((me as any).passwordHash).toBeUndefined();
+    expect(me?.openId).toBe("rep_safe");
+  });
+
+  it("validates currentPassword and updates hash on auth.changePassword", async () => {
+    const oldHash = hashPassword("OldPassword123!");
+    const currentUser: any = { id: 7, openId: "rep_safe", role: "user", isActive: true };
+
+    vi.spyOn(db, "getUserAuthById").mockResolvedValueOnce({
+      ...currentUser,
+      passwordHash: oldHash,
+    });
+    const resetSpy = vi.spyOn(db, "resetStaffPassword").mockResolvedValueOnce(true);
+
+    const { ctx } = createMockContext(currentUser);
+    const caller = appRouter.createCaller(ctx);
+
+    const res = await caller.auth.changePassword({
+      currentPassword: "OldPassword123!",
+      newPassword: "NewStrongPassword456!",
+    });
+
+    expect(res.success).toBe(true);
+    expect(resetSpy).toHaveBeenCalledWith(7, expect.stringContaining(":"));
+  });
+
+  it("rejects auth.changePassword when current password is wrong", async () => {
+    const oldHash = hashPassword("OldPassword123!");
+    const currentUser: any = { id: 7, openId: "rep_safe", role: "user", isActive: true };
+    vi.spyOn(db, "getUserAuthById").mockResolvedValueOnce({
+      ...currentUser,
+      passwordHash: oldHash,
+    });
+
+    const { ctx } = createMockContext(currentUser);
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(
+      caller.auth.changePassword({
+        currentPassword: "WrongPassword!",
+        newPassword: "NewStrongPassword456!",
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects insecure configuration in production mode", async () => {
+    const { validateProductionConfig } = await import("./_core/env");
+
+    expect(() =>
+      validateProductionConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "mysql://u:p@127.0.0.1:3306/db",
+        JWT_SECRET: "replace-with-a-long-random-secret",
+      }),
+    ).toThrow(/JWT_SECRET/);
+
+    expect(() =>
+      validateProductionConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "mysql://u:p@127.0.0.1:3306/db",
+        JWT_SECRET: "a".repeat(48),
+        DEMO_MODE_ENABLED: "true",
+        INITIAL_ADMIN_OPENID: "ops-admin",
+        INITIAL_ADMIN_PASSWORD: "UniqueProductionPassword!",
+      }),
+    ).toThrow(/DEMO_MODE_ENABLED/);
+
+    expect(() =>
+      validateProductionConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "mysql://u:p@127.0.0.1:3306/db",
+        JWT_SECRET: "a".repeat(48),
+        DEMO_MODE_ENABLED: "false",
+        INITIAL_ADMIN_OPENID: "ops-admin",
+        INITIAL_ADMIN_PASSWORD: "UniqueProductionPassword!",
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      validateProductionConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "mysql://u:p@127.0.0.1:3306/db",
+        JWT_SECRET: "a".repeat(48),
+        DEMO_MODE_ENABLED: "false",
+        INITIAL_ADMIN_PASSWORD: "UniqueProductionPassword!",
+      }),
+    ).toThrow(/INITIAL_ADMIN_OPENID/);
+
+    expect(() =>
+      validateProductionConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "mysql://u:p@127.0.0.1:3306/db",
+        JWT_SECRET: "a".repeat(48),
+        DEMO_MODE_ENABLED: "false",
+        INITIAL_ADMIN_OPENID: "admin",
+        INITIAL_ADMIN_PASSWORD: "Admin@123456",
+      }),
+    ).toThrow(/INITIAL_ADMIN_PASSWORD/);
   });
 });

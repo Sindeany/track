@@ -10,7 +10,7 @@ export default function Home() {
   const [, setLocation] = useLocation();
 
   useEffect(() => {
-    if (user) setLocation("/reports");
+    if (user) setLocation(user.role === "admin" ? "/manager" : "/reports");
   }, [user, setLocation]);
 
   if (loading || user) {

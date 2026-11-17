@@ -90,7 +90,7 @@ export default function ManagerStaff() {
 
   const deleteStaffMutation = trpc.auth.deleteStaff.useMutation({
     onSuccess: () => {
-      toast.success(`تم حذف المندوب (${staffToDelete?.name}) وكافة بياناته بنجاح.`);
+      toast.success(`تم حذف المندوب (${staffToDelete?.name}) بنجاح.`);
       setStaffToDelete(null);
       refetch();
     },
@@ -147,6 +147,10 @@ export default function ManagerStaff() {
       toast.error("يرجى ملء جميع الحقول المطلوبة.");
       return;
     }
+    if (newRep.password.length < 8) {
+      toast.error("كلمة المرور يجب ألا تقل عن 8 خانات.");
+      return;
+    }
     createUserMutation.mutate({
       openId: newRep.openId,
       name: newRep.name,
@@ -183,8 +187,8 @@ export default function ManagerStaff() {
   function handleResetPasswordSubmit(e: FormEvent) {
     e.preventDefault();
     if (!resettingUser || !newPassword) return;
-    if (newPassword.length < 6) {
-      toast.error("كلمة المرور يجب ألا تقل عن 6 خانات.");
+    if (newPassword.length < 8) {
+      toast.error("كلمة المرور يجب ألا تقل عن 8 خانات.");
       return;
     }
     resetPasswordMutation.mutate({
@@ -542,7 +546,7 @@ export default function ManagerStaff() {
                 type="password"
                 value={newRep.password}
                 onChange={e => setNewRep(prev => ({ ...prev, password: e.target.value }))}
-                placeholder="6 خانات على الأقل"
+                placeholder="8 خانات على الأقل"
                 required
               />
             </div>
@@ -667,7 +671,7 @@ export default function ManagerStaff() {
                 type="password"
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder="أدخل كلمة مرور قوية (6 خانات على الأقل)"
+                placeholder="أدخل كلمة مرور قوية (8 خانات على الأقل)"
                 required
                 minLength={6}
               />

@@ -22,6 +22,7 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       headers() {
+        if (!import.meta.env.DEV) return {};
         const demoRole = safeSessionStorage.getItem("field-visits-demo-role");
         return demoRole ? { "x-field-visits-demo-role": demoRole } : {};
       },

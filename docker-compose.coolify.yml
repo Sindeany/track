@@ -1,0 +1,52 @@
+# Coolify stack for https://track.sindean.com behind Cloudflare.
+# Cloudflare SSL/TLS mode must be Full, then Full (strict) after the origin certificate exists.
+# Do not use Flexible. Do not publish ports and do not add Caddy.
+# After the first save, set the app domain to https://track.sindean.com.
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: field_visits
+      MYSQL_USER: fieldvisits
+      MYSQL_PASSWORD: ${SERVICE_PASSWORD_MYSQL}
+      MYSQL_ROOT_PASSWORD: ${SERVICE_PASSWORD_MYSQLROOT}
+    volumes:
+      - field_visits_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SERVICE_FQDN_APP_3000:
+      NODE_ENV: production
+      PORT: "3000"
+      UPLOAD_DIR: /app/uploads
+      TRUST_PROXY: "1"
+      APP_TIMEZONE: Asia/Riyadh
+      DEMO_MODE_ENABLED: "false"
+      DATABASE_URL: mysql://fieldvisits:${SERVICE_PASSWORD_MYSQL}@mysql:3306/field_visits
+      JWT_SECRET: ${SERVICE_HEX_64_JWT}
+      INITIAL_ADMIN_OPENID: admin
+      INITIAL_ADMIN_PASSWORD: ${SERVICE_PASSWORD_ADMIN}
+      INITIAL_ADMIN_EMAIL: admin@sindean.com
+    expose:
+      - "3000"
+    volumes:
+      - field_visits_uploads:/app/uploads
+
+volumes:
+  field_visits_mysql:
+  field_visits_uploads:

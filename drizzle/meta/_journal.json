@@ -36,6 +36,13 @@
       "when": 1788481062610,
       "tag": "0004_lively_onslaught",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1794927534217,
+      "tag": "0005_session_version",
+      "breakpoints": true
     }
   ]
 }
