@@ -66,11 +66,11 @@ export async function createApp() {
         ? {
             directives: {
               defaultSrc: ["'self'"],
-              scriptSrc: ["'self'"],
+              scriptSrc: ["'self'", "https://static.cloudflareinsights.com"],
               styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
               fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
               imgSrc: ["'self'", "data:", "blob:"],
-              connectSrc: ["'self'"],
+              connectSrc: ["'self'", "https://cloudflareinsights.com"],
               mediaSrc: ["'self'", "blob:"],
               objectSrc: ["'none'"],
               baseUri: ["'self'"],

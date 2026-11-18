@@ -19,20 +19,7 @@ export default defineConfig({
     outDir: path.resolve(process.cwd(), "dist/public"),
     emptyOutDir: true,
     target: ["es2020", "safari14", "ios14"],
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return;
-          if (id.includes("framer-motion")) return "motion";
-          if (id.includes("lucide-react")) return "icons";
-          if (id.includes("@radix-ui")) return "radix-ui";
-          if (id.includes("@trpc") || id.includes("@tanstack") || id.includes("superjson")) {
-            return "trpc-query";
-          }
-          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react-vendor";
-        },
-      },
-    },
+    chunkSizeWarningLimit: 1200,
   },
   server: {
     host: true,
